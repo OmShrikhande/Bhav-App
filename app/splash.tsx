@@ -236,7 +236,10 @@ export default function SplashScreen() {
               } else if (authState.user?.role === 'admin' || authState.user?.username === 'vipin_bullion') {
                 console.log("Splash: User is an admin, navigating to admin dashboard");
                 // For admin users, use a different approach to avoid loops
-                router.push("/(admin)/dashboard");
+                // First store the admin user in AsyncStorage to ensure it's available in the admin layout
+                await AsyncStorage.setItem('admin-user', JSON.stringify(authState.user));
+                // Use replace instead of push to avoid back navigation issues
+                router.replace("/(admin)/dashboard");
               } else {
                 console.log("Splash: User is a customer, navigating to customer dashboard");
                 router.replace("/(app)/(tabs)/dashboard");

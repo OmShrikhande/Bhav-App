@@ -74,6 +74,9 @@ export default function AdminLoginScreen() {
           // Clear any navigation flags before redirecting
           await AsyncStorage.removeItem('navigation-in-progress');
           
+          // Store admin user in AsyncStorage for the admin layout
+          await AsyncStorage.setItem('admin-user', JSON.stringify(firebaseAuth.user));
+          
           // Show success message
           Alert.alert(
             "Login Successful",
@@ -151,6 +154,19 @@ export default function AdminLoginScreen() {
         firebaseUid: user.uid,
         catalogue: null
       });
+      
+      // Store the newly created admin user in AsyncStorage
+      const adminUser = {
+        id: user.uid,
+        email: email,
+        username: username,
+        fullName: fullName,
+        name: fullName,
+        role: 'admin',
+        firebaseUid: user.uid
+      };
+      
+      await AsyncStorage.setItem('admin-user', JSON.stringify(adminUser));
       
       Alert.alert(
         "Success", 

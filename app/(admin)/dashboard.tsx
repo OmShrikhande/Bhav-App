@@ -9,14 +9,34 @@ import {
   Alert,
   Modal,
   FlatList,
-  Platform
+  Platform,
+  ActivityIndicator,
+  RefreshControl
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { LinearGradient } from "expo-linear-gradient";
 import { useAuthStore } from "@/store/auth-store";
+import { useFirebaseAuthStore } from "@/store/firebase-auth-store";
+import { useAuth } from "@/context/auth-context";
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { 
+  collection, 
+  getDocs, 
+  getFirestore, 
+  query, 
+  where, 
+  orderBy, 
+  limit,
+  doc,
+  getDoc,
+  updateDoc,
+  Timestamp,
+  addDoc,
+  deleteDoc
+} from 'firebase/firestore';
 import {
   Users as UsersIcon,
   TrendingUp,
@@ -42,24 +62,191 @@ import {
   Gift,
   Award,
   ShoppingBag,
-  UserCheck
+  UserCheck,
+  RefreshCw,
+  PlusCircle,
+  Edit,
+  FileText,
+  Calendar
 } from "lucide-react-native";
 
 const { width } = Dimensions.get("window");
 const CARD_WIDTH = width - 40; // Full width for single card
 
 export default function AdminDashboardScreen() {
-  const { user, logout, notifications, unreadNotificationsCount, markNotificationAsRead, markAllNotificationsAsRead, users, getSellerCount, getCustomerCount } = useAuthStore();
+  const { user: legacyUser, logout, notifications, unreadNotificationsCount, markNotificationAsRead, markAllNotificationsAsRead } = useAuthStore();
+  const { firebaseAuth } = useAuth();
+  const firebaseUser = firebaseAuth.user;
   const router = useRouter();
+  const db = getFirestore();
+  
+  // State variables
   const [showNotifications, setShowNotifications] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [users, setUsers] = useState([]);
+  const [sellerCount, setSellerCount] = useState(0);
+  const [customerCount, setCustomerCount] = useState(0);
+  const [adminNotifications, setAdminNotifications] = useState([]);
+  const [recentTransactions, setRecentTransactions] = useState([]);
+  const [pendingApprovals, setPendingApprovals] = useState([]);
+  const [stats, setStats] = useState({
+    totalUsers: 0,
+    activeUsers: 0,
+    totalSellers: 0,
+    totalCustomers: 0,
+    pendingApprovals: 0,
+    totalTransactions: 0
+  });
+  
+  // Use the current user from Firebase or legacy store
+  const currentUser = firebaseUser || legacyUser;
+  
+  // Fetch users from Firestore
+  const fetchUsers = async () => {
+    try {
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, orderBy('createdAt', 'desc'));
+      const querySnapshot = await getDocs(q);
+      
+      const fetchedUsers = [];
+      let sellers = 0;
+      let customers = 0;
+      let pending = 0;
+      
+      querySnapshot.forEach((doc) => {
+        const userData = { id: doc.id, ...doc.data() };
+        fetchedUsers.push(userData);
+        
+        // Count user types
+        if (userData.role === 'seller') {
+          sellers++;
+        } else if (userData.role === 'customer' || userData.role === 'buyer') {
+          customers++;
+        }
+        
+        if (userData.role === 'seller_pending') {
+          pending++;
+        }
+      });
+      
+      setUsers(fetchedUsers);
+      setSellerCount(sellers);
+      setCustomerCount(customers);
+      
+      // Update stats
+      setStats(prev => ({
+        ...prev,
+        totalUsers: fetchedUsers.length,
+        activeUsers: fetchedUsers.filter(u => u.isActive).length,
+        totalSellers: sellers,
+        totalCustomers: customers,
+        pendingApprovals: pending
+      }));
+      
+      return fetchedUsers;
+    } catch (error) {
+      console.error("Error fetching users:", error);
+      return [];
+    }
+  };
+  
+  // Fetch notifications from Firestore
+  const fetchNotifications = async () => {
+    try {
+      const notificationsRef = collection(db, 'notifications');
+      const q = query(notificationsRef, orderBy('timestamp', 'desc'), limit(10));
+      const querySnapshot = await getDocs(q);
+      
+      const fetchedNotifications = [];
+      querySnapshot.forEach((doc) => {
+        fetchedNotifications.push({ id: doc.id, ...doc.data() });
+      });
+      
+      setAdminNotifications(fetchedNotifications);
+      return fetchedNotifications;
+    } catch (error) {
+      console.error("Error fetching notifications:", error);
+      return [];
+    }
+  };
+  
+  // Fetch pending approvals
+  const fetchPendingApprovals = async () => {
+    try {
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('role', '==', 'seller_pending'));
+      const querySnapshot = await getDocs(q);
+      
+      const pendingSellers = [];
+      querySnapshot.forEach((doc) => {
+        pendingSellers.push({ id: doc.id, ...doc.data() });
+      });
+      
+      setPendingApprovals(pendingSellers);
+      return pendingSellers;
+    } catch (error) {
+      console.error("Error fetching pending approvals:", error);
+      return [];
+    }
+  };
+  
+  // Fetch recent transactions
+  const fetchRecentTransactions = async () => {
+    try {
+      const transactionsRef = collection(db, 'transactions');
+      const q = query(transactionsRef, orderBy('timestamp', 'desc'), limit(5));
+      const querySnapshot = await getDocs(q);
+      
+      const transactions = [];
+      querySnapshot.forEach((doc) => {
+        transactions.push({ id: doc.id, ...doc.data() });
+      });
+      
+      setRecentTransactions(transactions);
+      
+      // Update stats
+      setStats(prev => ({
+        ...prev,
+        totalTransactions: transactions.length
+      }));
+      
+      return transactions;
+    } catch (error) {
+      console.error("Error fetching transactions:", error);
+      return [];
+    }
+  };
+  
+  // Load all data
+  const loadAllData = async () => {
+    setLoading(true);
+    try {
+      await Promise.all([
+        fetchUsers(),
+        fetchNotifications(),
+        fetchPendingApprovals(),
+        fetchRecentTransactions()
+      ]);
+    } catch (error) {
+      console.error("Error loading data:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Handle refresh
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await loadAllData();
+    setRefreshing(false);
+  };
 
-  // Get seller and customer counts
-  const sellerCount = getSellerCount();
-  const customerCount = getCustomerCount();
-
-  // Get notifications for admin (all notifications)
-  const adminNotifications = notifications;
-
+  // Load data when component mounts
+  useEffect(() => {
+    loadAllData();
+  }, []);
+  
   const openDrawer = () => {
     router.push("/drawer");
   };
@@ -75,14 +262,88 @@ export default function AdminDashboardScreen() {
         },
         {
           text: "Logout",
-          onPress: () => {
-            logout();
-            router.replace("/auth/login");
+          onPress: async () => {
+            try {
+              // Set logout flag
+              await AsyncStorage.setItem('logout-in-progress', 'true');
+              // Clear admin user from storage
+              await AsyncStorage.removeItem('admin-user');
+              // Perform logout
+              await firebaseAuth.logOut();
+              logout();
+              // Navigate to login
+              router.replace("/auth/login");
+            } catch (error) {
+              console.error("Logout error:", error);
+              Alert.alert("Error", "Failed to logout. Please try again.");
+            }
           },
           style: "destructive"
         }
       ]
     );
+  };
+  
+  // Function to approve a seller
+  const approveSeller = async (userId) => {
+    try {
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(userRef, {
+        role: 'seller',
+        sellerVerified: true,
+        updatedAt: Timestamp.now()
+      });
+      
+      // Add notification
+      const notificationRef = collection(db, 'notifications');
+      await addDoc(notificationRef, {
+        userId: userId,
+        title: 'Seller Approved',
+        message: 'Your seller account has been approved. You can now list products.',
+        type: 'role_change',
+        read: false,
+        timestamp: Date.now()
+      });
+      
+      // Refresh data
+      await loadAllData();
+      
+      Alert.alert("Success", "Seller has been approved successfully.");
+    } catch (error) {
+      console.error("Error approving seller:", error);
+      Alert.alert("Error", "Failed to approve seller. Please try again.");
+    }
+  };
+  
+  // Function to reject a seller
+  const rejectSeller = async (userId) => {
+    try {
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(userRef, {
+        role: 'customer',
+        sellerVerified: false,
+        updatedAt: Timestamp.now()
+      });
+      
+      // Add notification
+      const notificationRef = collection(db, 'notifications');
+      await addDoc(notificationRef, {
+        userId: userId,
+        title: 'Seller Application Rejected',
+        message: 'Your seller application has been rejected. Please contact support for more information.',
+        type: 'role_change',
+        read: false,
+        timestamp: Date.now()
+      });
+      
+      // Refresh data
+      await loadAllData();
+      
+      Alert.alert("Success", "Seller has been rejected.");
+    } catch (error) {
+      console.error("Error rejecting seller:", error);
+      Alert.alert("Error", "Failed to reject seller. Please try again.");
+    }
   };
 
   const toggleNotifications = () => {
@@ -183,9 +444,11 @@ export default function AdminDashboardScreen() {
           onPress={toggleNotifications}
         >
           <Bell size={24} color="#333333" />
-          {unreadNotificationsCount > 0 && (
+          {adminNotifications.filter(n => !n.read).length > 0 && (
             <View style={styles.notificationBadge}>
-              <Text style={styles.notificationBadgeText}>{unreadNotificationsCount}</Text>
+              <Text style={styles.notificationBadgeText}>
+                {adminNotifications.filter(n => !n.read).length}
+              </Text>
             </View>
           )}
         </TouchableOpacity>
@@ -194,164 +457,305 @@ export default function AdminDashboardScreen() {
       <ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={["#1976D2"]}
+            tintColor="#1976D2"
+          />
+        }
       >
-        <View style={styles.welcomeContainer}>
-          <Text style={styles.welcomeText}>Welcome, Admin</Text>
-          <Text style={styles.adminName}>{user?.fullName || user?.name}</Text>
-        </View>
-
-        {/* Stats Cards */}
-        <View style={styles.statsContainer}>
-          <LinearGradient
-            colors={["#1976D2", "#64B5F6"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.singleStatCard}
-          >
-            <View style={styles.statIconContainer}>
-              <UsersIcon size={24} color="#ffffff" />
-            </View>
-            <Text style={styles.statValue}>{users.length}</Text>
-            <Text style={styles.statLabel}>Total Users</Text>
-            <View style={styles.statTrend}>
-              <ArrowUpRight size={16} color="#ffffff" />
-              <Text style={styles.statTrendText}>+12%</Text>
-            </View>
-          </LinearGradient>
-        </View>
-
-        {/* Seller and Customer Stats */}
-        <View style={styles.statsContainer}>
-          <LinearGradient
-            colors={["#F3B62B", "#F5D76E"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.singleStatCard}
-          >
-            <View style={styles.statIconContainer}>
-              <ShoppingBag size={24} color="#ffffff" />
-            </View>
-            <Text style={styles.statValue}>{sellerCount}</Text>
-            <Text style={styles.statLabel}>Total Sellers</Text>
-            <View style={styles.statTrend}>
-              <ArrowUpRight size={16} color="#ffffff" />
-              <Text style={styles.statTrendText}>+8%</Text>
-            </View>
-          </LinearGradient>
-        </View>
-
-        <View style={styles.statsContainer}>
-          <LinearGradient
-            colors={["#002810", "#43A047"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.singleStatCard}
-          >
-            <View style={styles.statIconContainer}>
-              <User size={24} color="#ffffff" />
-            </View>
-            <Text style={styles.statValue}>{customerCount}</Text>
-            <Text style={styles.statLabel}>Total Customers</Text>
-            <View style={styles.statTrend}>
-              <ArrowUpRight size={16} color="#ffffff" />
-              <Text style={styles.statTrendText}>+15%</Text>
-            </View>
-          </LinearGradient>
-        </View>
-
-        <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
-          <View style={styles.quickActionsContainer}>
-            <TouchableOpacity
-              style={styles.quickActionButton}
-              onPress={() => router.push("/(admin)/users")}
-            >
-              <View style={[styles.quickActionIcon, { backgroundColor: "#E3F2FD" }]}>
-                <UsersIcon size={24} color="#1976D2" />
-              </View>
-              <Text style={styles.quickActionText}>Manage Users</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.quickActionButton}
-              onPress={() => router.push("/(admin)/analytics")}
-            >
-              <View style={[styles.quickActionIcon, { backgroundColor: "#FFF8E1" }]}>
-                <BarChart2 size={24} color="#F3B62B" />
-              </View>
-              <Text style={styles.quickActionText}>View Analytics</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.quickActionButton}
-              onPress={() => router.push("/(app)/live-rates")}
-            >
-              <View style={[styles.quickActionIcon, { backgroundColor: "#E8F5E9" }]}>
-                <TrendingUp size={24} color="#43A047" />
-              </View>
-              <Text style={styles.quickActionText}>Live Rates</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.quickActionButton}
-              onPress={() => router.push("/(app)/share")}
-            >
-              <View style={[styles.quickActionIcon, { backgroundColor: "#FFF3E0" }]}>
-                <Gift size={24} color="#FF9800" />
-              </View>
-              <Text style={styles.quickActionText}>Referral Program</Text>
-            </TouchableOpacity>
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#F3B62B" />
+            <Text style={styles.loadingText}>Loading dashboard data...</Text>
           </View>
-        </View>
+        ) : (
+          <>
+            <View style={styles.welcomeContainer}>
+              <Text style={styles.welcomeText}>Welcome, Admin</Text>
+              <Text style={styles.adminName}>{currentUser?.fullName || currentUser?.name}</Text>
+            </View>
 
-        <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>Recent Activities</Text>
-          <View style={styles.activitiesContainer}>
-            {/* Recent Activities from Notifications */}
-            {adminNotifications.slice(0, 5).map((notification, index) => (
-              <View style={styles.activityItem} key={notification.id || `activity-${index}`}>
-                <View style={[styles.activityIcon, {
-                  backgroundColor: notification.type === 'user_signup' ? "#E3F2FD" :
-                    notification.type === 'transaction' ? "#FFF8E1" :
-                      notification.type === 'system' ? "#E8F5E9" :
-                        notification.type === 'alert' ? "#FFEBEE" :
-                          notification.type === 'contact_request' ? "#E8F5E9" :
-                            notification.type === 'role_change' ? "#E8F5E9" :
-                              notification.type === 'payment_success' ? "#E8F5E9" :
-                                notification.type === 'referral' ? "#FFF8E1" :
-                                  "#f5f5f5"
-                }]}>
-                  {getNotificationIcon(notification.type)}
+            {/* Stats Cards */}
+            <View style={styles.statsContainer}>
+              <LinearGradient
+                colors={["#1976D2", "#64B5F6"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.singleStatCard}
+              >
+                <View style={styles.statIconContainer}>
+                  <UsersIcon size={24} color="#ffffff" />
                 </View>
-                <View style={styles.activityContent}>
-                  <Text style={styles.activityTitle}>{notification.title}</Text>
-                  <Text style={styles.activityDescription}>{notification.message}</Text>
-                  <View style={styles.activityMeta}>
-                    <Clock size={14} color="#9e9e9e" />
-                    <Text style={styles.activityTime}>{formatTimestamp(notification.timestamp)}</Text>
-                  </View>
+                <Text style={styles.statValue}>{stats.totalUsers}</Text>
+                <Text style={styles.statLabel}>Total Users</Text>
+                <View style={styles.statTrend}>
+                  <ArrowUpRight size={16} color="#ffffff" />
+                  <Text style={styles.statTrendText}>Active</Text>
                 </View>
-              </View>
-            ))}
+              </LinearGradient>
+            </View>
 
-            {adminNotifications.length === 0 && (
-              <View style={styles.emptyActivities}>
-                <Text style={styles.emptyActivitiesText}>No recent activities</Text>
+            {/* Seller and Customer Stats */}
+            <View style={styles.statsContainer}>
+              <LinearGradient
+                colors={["#F3B62B", "#F5D76E"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.singleStatCard}
+              >
+                <View style={styles.statIconContainer}>
+                  <ShoppingBag size={24} color="#ffffff" />
+                </View>
+                <Text style={styles.statValue}>{stats.totalSellers}</Text>
+                <Text style={styles.statLabel}>Total Sellers</Text>
+                <TouchableOpacity 
+                  style={styles.statTrend}
+                  onPress={() => router.push("/(admin)/users")}
+                >
+                  <ArrowUpRight size={16} color="#ffffff" />
+                  <Text style={styles.statTrendText}>View All</Text>
+                </TouchableOpacity>
+              </LinearGradient>
+            </View>
+
+            <View style={styles.statsContainer}>
+              <LinearGradient
+                colors={["#002810", "#43A047"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.singleStatCard}
+              >
+                <View style={styles.statIconContainer}>
+                  <User size={24} color="#ffffff" />
+                </View>
+                <Text style={styles.statValue}>{stats.totalCustomers}</Text>
+                <Text style={styles.statLabel}>Total Customers</Text>
+                <TouchableOpacity 
+                  style={styles.statTrend}
+                  onPress={() => router.push("/(admin)/users")}
+                >
+                  <ArrowUpRight size={16} color="#ffffff" />
+                  <Text style={styles.statTrendText}>View All</Text>
+                </TouchableOpacity>
+              </LinearGradient>
+            </View>
+
+            {/* Pending Approvals Section */}
+            {pendingApprovals.length > 0 && (
+              <View style={styles.sectionContainer}>
+                <Text style={styles.sectionTitle}>Pending Approvals ({pendingApprovals.length})</Text>
+                <View style={styles.pendingApprovalsContainer}>
+                  {pendingApprovals.map((seller) => (
+                    <View style={styles.pendingApprovalItem} key={seller.id}>
+                      <View style={styles.pendingApprovalHeader}>
+                        <View style={styles.pendingApprovalUser}>
+                          <View style={styles.pendingApprovalAvatar}>
+                            <User size={20} color="#F3B62B" />
+                          </View>
+                          <View>
+                            <Text style={styles.pendingApprovalName}>{seller.fullName || seller.name}</Text>
+                            <Text style={styles.pendingApprovalEmail}>{seller.email}</Text>
+                          </View>
+                        </View>
+                        <View style={styles.pendingApprovalBadge}>
+                          <Text style={styles.pendingApprovalBadgeText}>Pending</Text>
+                        </View>
+                      </View>
+                      
+                      <View style={styles.pendingApprovalDetails}>
+                        {seller.phone && (
+                          <View style={styles.pendingApprovalDetail}>
+                            <Phone size={16} color="#666666" />
+                            <Text style={styles.pendingApprovalDetailText}>{seller.phone}</Text>
+                          </View>
+                        )}
+                        
+                        {seller.city && seller.state && (
+                          <View style={styles.pendingApprovalDetail}>
+                            <MapPin size={16} color="#666666" />
+                            <Text style={styles.pendingApprovalDetailText}>{seller.city}, {seller.state}</Text>
+                          </View>
+                        )}
+                      </View>
+                      
+                      <View style={styles.pendingApprovalActions}>
+                        <TouchableOpacity 
+                          style={[styles.pendingApprovalAction, styles.approveButton]}
+                          onPress={() => approveSeller(seller.id)}
+                        >
+                          <CheckCircle size={16} color="#ffffff" />
+                          <Text style={styles.pendingApprovalActionText}>Approve</Text>
+                        </TouchableOpacity>
+                        
+                        <TouchableOpacity 
+                          style={[styles.pendingApprovalAction, styles.rejectButton]}
+                          onPress={() => rejectSeller(seller.id)}
+                        >
+                          <XCircle size={16} color="#ffffff" />
+                          <Text style={styles.pendingApprovalActionText}>Reject</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))}
+                </View>
               </View>
             )}
-          </View>
-        </View>
 
-        {/* Logout Button */}
-        <View style={styles.logoutContainer}>
-          <TouchableOpacity
-            style={styles.logoutButton}
-            onPress={handleLogout}
-          >
-            <LogOut size={20} color="#ffffff" />
-            <Text style={styles.logoutText}>Logout</Text>
-          </TouchableOpacity>
-        </View>
+            <View style={styles.sectionContainer}>
+              <Text style={styles.sectionTitle}>Quick Actions</Text>
+              <View style={styles.quickActionsContainer}>
+                <TouchableOpacity
+                  style={styles.quickActionButton}
+                  onPress={() => router.push("/(admin)/users")}
+                >
+                  <View style={[styles.quickActionIcon, { backgroundColor: "#E3F2FD" }]}>
+                    <UsersIcon size={24} color="#1976D2" />
+                  </View>
+                  <Text style={styles.quickActionText}>Manage Users</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.quickActionButton}
+                  onPress={() => router.push("/(admin)/analytics")}
+                >
+                  <View style={[styles.quickActionIcon, { backgroundColor: "#FFF8E1" }]}>
+                    <BarChart2 size={24} color="#F3B62B" />
+                  </View>
+                  <Text style={styles.quickActionText}>View Analytics</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.quickActionButton}
+                  onPress={() => router.push("/(app)/live-rates")}
+                >
+                  <View style={[styles.quickActionIcon, { backgroundColor: "#E8F5E9" }]}>
+                    <TrendingUp size={24} color="#43A047" />
+                  </View>
+                  <Text style={styles.quickActionText}>Live Rates</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.quickActionButton}
+                  onPress={() => router.push("/(app)/share")}
+                >
+                  <View style={[styles.quickActionIcon, { backgroundColor: "#FFF3E0" }]}>
+                    <Gift size={24} color="#FF9800" />
+                  </View>
+                  <Text style={styles.quickActionText}>Referral Program</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Recent Transactions Section */}
+            {recentTransactions.length > 0 && (
+              <View style={styles.sectionContainer}>
+                <Text style={styles.sectionTitle}>Recent Transactions</Text>
+                <View style={styles.transactionsContainer}>
+                  {recentTransactions.map((transaction) => (
+                    <View style={styles.transactionItem} key={transaction.id}>
+                      <View style={styles.transactionHeader}>
+                        <View style={[styles.transactionIcon, { 
+                          backgroundColor: transaction.status === 'completed' ? '#E8F5E9' : 
+                                          transaction.status === 'pending' ? '#FFF8E1' : 
+                                          transaction.status === 'failed' ? '#FFEBEE' : '#f5f5f5'
+                        }]}>
+                          <DollarSign size={20} color={
+                            transaction.status === 'completed' ? '#43A047' : 
+                            transaction.status === 'pending' ? '#F3B62B' : 
+                            transaction.status === 'failed' ? '#E53935' : '#333333'
+                          } />
+                        </View>
+                        <View style={styles.transactionInfo}>
+                          <Text style={styles.transactionTitle}>{transaction.type || 'Transaction'}</Text>
+                          <Text style={styles.transactionAmount}>₹{transaction.amount?.toFixed(2) || '0.00'}</Text>
+                        </View>
+                        <View style={[styles.transactionStatus, {
+                          backgroundColor: transaction.status === 'completed' ? '#E8F5E9' : 
+                                          transaction.status === 'pending' ? '#FFF8E1' : 
+                                          transaction.status === 'failed' ? '#FFEBEE' : '#f5f5f5'
+                        }]}>
+                          <Text style={[styles.transactionStatusText, {
+                            color: transaction.status === 'completed' ? '#43A047' : 
+                                  transaction.status === 'pending' ? '#F3B62B' : 
+                                  transaction.status === 'failed' ? '#E53935' : '#333333'
+                          }]}>
+                            {transaction.status?.charAt(0).toUpperCase() + transaction.status?.slice(1) || 'Unknown'}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={styles.transactionDetails}>
+                        <View style={styles.transactionDetail}>
+                          <User size={14} color="#666666" />
+                          <Text style={styles.transactionDetailText}>
+                            {transaction.userName || 'Unknown User'}
+                          </Text>
+                        </View>
+                        <View style={styles.transactionDetail}>
+                          <Calendar size={14} color="#666666" />
+                          <Text style={styles.transactionDetailText}>
+                            {formatTimestamp(transaction.timestamp)}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            <View style={styles.sectionContainer}>
+              <Text style={styles.sectionTitle}>Recent Activities</Text>
+              <View style={styles.activitiesContainer}>
+                {/* Recent Activities from Notifications */}
+                {adminNotifications.slice(0, 5).map((notification, index) => (
+                  <View style={styles.activityItem} key={notification.id || `activity-${index}`}>
+                    <View style={[styles.activityIcon, {
+                      backgroundColor: notification.type === 'user_signup' ? "#E3F2FD" :
+                        notification.type === 'transaction' ? "#FFF8E1" :
+                          notification.type === 'system' ? "#E8F5E9" :
+                            notification.type === 'alert' ? "#FFEBEE" :
+                              notification.type === 'contact_request' ? "#E8F5E9" :
+                                notification.type === 'role_change' ? "#E8F5E9" :
+                                  notification.type === 'payment_success' ? "#E8F5E9" :
+                                    notification.type === 'referral' ? "#FFF8E1" :
+                                      "#f5f5f5"
+                    }]}>
+                      {getNotificationIcon(notification.type)}
+                    </View>
+                    <View style={styles.activityContent}>
+                      <Text style={styles.activityTitle}>{notification.title}</Text>
+                      <Text style={styles.activityDescription}>{notification.message}</Text>
+                      <View style={styles.activityMeta}>
+                        <Clock size={14} color="#9e9e9e" />
+                        <Text style={styles.activityTime}>{formatTimestamp(notification.timestamp)}</Text>
+                      </View>
+                    </View>
+                  </View>
+                ))}
+
+                {adminNotifications.length === 0 && (
+                  <View style={styles.emptyActivities}>
+                    <Text style={styles.emptyActivitiesText}>No recent activities</Text>
+                  </View>
+                )}
+              </View>
+            </View>
+
+            {/* Logout Button */}
+            <View style={styles.logoutContainer}>
+              <TouchableOpacity
+                style={styles.logoutButton}
+                onPress={handleLogout}
+              >
+                <LogOut size={20} color="#ffffff" />
+                <Text style={styles.logoutText}>Logout</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
       </ScrollView>
 
       {/* Notifications Modal */}
@@ -1108,5 +1512,170 @@ const styles = StyleSheet.create({
   paymentSuccessNotification: {
     flexDirection: "row",
     flex: 1,
+  },
+  
+  // Loading Container
+  loadingContainer: {
+    padding: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  loadingText: {
+    fontSize: 16,
+    color: "#666666",
+    marginTop: 15,
+    textAlign: "center",
+  },
+  
+  // Pending Approvals Styles
+  pendingApprovalsContainer: {
+    marginTop: 10,
+  },
+  pendingApprovalItem: {
+    backgroundColor: "#ffffff",
+    borderRadius: 10,
+    padding: 15,
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: "#eeeeee",
+  },
+  pendingApprovalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  pendingApprovalUser: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  pendingApprovalAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#FFF8E1",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 10,
+  },
+  pendingApprovalName: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#333333",
+  },
+  pendingApprovalEmail: {
+    fontSize: 14,
+    color: "#666666",
+  },
+  pendingApprovalBadge: {
+    backgroundColor: "#FFF8E1",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 15,
+  },
+  pendingApprovalBadgeText: {
+    color: "#F3B62B",
+    fontSize: 12,
+    fontWeight: "bold",
+  },
+  pendingApprovalDetails: {
+    marginBottom: 15,
+  },
+  pendingApprovalDetail: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 5,
+  },
+  pendingApprovalDetailText: {
+    fontSize: 14,
+    color: "#666666",
+    marginLeft: 10,
+  },
+  pendingApprovalActions: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  pendingApprovalAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    borderRadius: 5,
+    flex: 1,
+  },
+  approveButton: {
+    backgroundColor: "#43A047",
+    marginRight: 10,
+  },
+  rejectButton: {
+    backgroundColor: "#E53935",
+  },
+  pendingApprovalActionText: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "bold",
+    marginLeft: 5,
+  },
+  
+  // Transaction Styles
+  transactionsContainer: {
+    marginTop: 10,
+  },
+  transactionItem: {
+    backgroundColor: "#ffffff",
+    borderRadius: 10,
+    padding: 15,
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: "#eeeeee",
+  },
+  transactionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  transactionIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 10,
+  },
+  transactionInfo: {
+    flex: 1,
+  },
+  transactionTitle: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#333333",
+  },
+  transactionAmount: {
+    fontSize: 14,
+    color: "#666666",
+  },
+  transactionStatus: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 15,
+  },
+  transactionStatusText: {
+    fontSize: 12,
+    fontWeight: "bold",
+  },
+  transactionDetails: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+  },
+  transactionDetail: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginRight: 15,
+  },
+  transactionDetailText: {
+    fontSize: 12,
+    color: "#666666",
+    marginLeft: 5,
   },
 });

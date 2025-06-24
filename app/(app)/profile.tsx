@@ -12,13 +12,43 @@ import {
   Alert,
   Share,
   FlatList,
+  Linking,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { LinearGradient } from "expo-linear-gradient";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
-import { User, Mail, Phone, MapPin, Camera, Save, CheckCircle, ArrowUpCircle, Store, Check, Copy, Share2, Menu, Instagram, Plus, X } from "lucide-react-native";
+import { 
+  User, 
+  Mail, 
+  Phone, 
+  MapPin, 
+  Camera, 
+  Save, 
+  CheckCircle, 
+  ArrowUpCircle, 
+  Store, 
+  Check, 
+  Copy, 
+  Share2, 
+  Menu, 
+  Instagram, 
+  Plus, 
+  X, 
+  Calendar, 
+  Clock, 
+  Shield, 
+  Award, 
+  Star, 
+  Gift, 
+  FileText, 
+  Settings,
+  Info,
+  AlertCircle,
+  HelpCircle,
+  Bell
+} from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import * as Clipboard from "expo-clipboard";
 import { useAuthStore } from "@/store/auth-store";
@@ -27,11 +57,13 @@ import { firestoreService } from "@/services/firestore";
 import { images } from "@/constants/images";
 import { useRouter } from "expo-router";
 import { FontAwesome } from '@expo/vector-icons';
+import { getFirestore, doc, getDoc, collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
 
 export default function ProfileScreen() {
   const { user, updateUser } = useAuthStore();
   const { user: firebaseUser, firebaseAuth } = useAuth();
   const router = useRouter();
+  const db = getFirestore();
   
   // Use Firebase user if available, otherwise fall back to legacy user
   const currentUser = firebaseUser || user;
@@ -39,10 +71,10 @@ export default function ProfileScreen() {
   const [email, setEmail] = useState(currentUser?.email || "");
   const [phone, setPhone] = useState(currentUser?.phone || "");
   const [address, setAddress] = useState(currentUser?.address || "");
-  const [brandName, setBrandName] = useState(currentUser?.brandName || ""); // Added brand name state
-  const [about, setAbout] = useState(currentUser?.about || ""); // Added about state
+  const [brandName, setBrandName] = useState(currentUser?.brandName || "");
+  const [about, setAbout] = useState(currentUser?.about || "");
   const [profileImage, setProfileImage] = useState<string | null>(currentUser?.profileImage || null);
-  const [brandImage, setBrandImage] = useState<string | null>(currentUser?.brandImage || null); // Added brand image state
+  const [brandImage, setBrandImage] = useState<string | null>(currentUser?.brandImage || null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [error, setError] = useState("");
@@ -51,6 +83,21 @@ export default function ProfileScreen() {
   const [whatsappNumber, setWhatsappNumber] = useState(currentUser?.whatsappNumber || "");
   const [instagramHandle, setInstagramHandle] = useState(currentUser?.instagramHandle || "");
   const [location, setLocation] = useState(currentUser?.location || "");
+
+  // Additional user details
+  const [userDetails, setUserDetails] = useState<any>({
+    joinDate: null,
+    lastActive: null,
+    transactions: [],
+    notifications: [],
+    accountStatus: 'Active',
+    verificationStatus: false,
+    referralCode: '',
+    referralCount: 0
+  });
+  
+  const [isLoadingDetails, setIsLoadingDetails] = useState(true);
+  const [activeTab, setActiveTab] = useState('profile'); // 'profile', 'activity', 'settings'
 
   // Add catalogue images state
   const [catalogueImages, setCatalogueImages] = useState<string[]>(() => {
@@ -70,6 +117,83 @@ export default function ProfileScreen() {
     return [];
   });
 
+  // Function to fetch additional user details from Firebase
+  const fetchUserDetails = async () => {
+    if (!currentUser || !currentUser.id) return;
+    
+    setIsLoadingDetails(true);
+    try {
+      // Get user document from Firestore
+      const userRef = doc(db, 'users', currentUser.id);
+      const userSnap = await getDoc(userRef);
+      
+      if (userSnap.exists()) {
+        const userData = userSnap.data();
+        
+        // Format dates
+        const joinDate = userData.createdAt ? new Date(userData.createdAt.seconds * 1000) : null;
+        const lastActive = userData.lastActive ? new Date(userData.lastActive.seconds * 1000) : null;
+        
+        // Get user's transactions
+        const transactionsRef = collection(db, 'transactions');
+        const transactionsQuery = query(
+          transactionsRef, 
+          where('userId', '==', currentUser.id),
+          orderBy('timestamp', 'desc'),
+          limit(5)
+        );
+        const transactionsSnap = await getDocs(transactionsQuery);
+        const transactions = transactionsSnap.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        
+        // Get user's notifications
+        const notificationsRef = collection(db, 'notifications');
+        const notificationsQuery = query(
+          notificationsRef,
+          where('userId', '==', currentUser.id),
+          orderBy('timestamp', 'desc'),
+          limit(5)
+        );
+        const notificationsSnap = await getDocs(notificationsQuery);
+        const notifications = notificationsSnap.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        
+        // Get referral information
+        const referralCode = userData.referralCode || '';
+        
+        // Count referrals (users who used this referral code)
+        let referralCount = 0;
+        if (referralCode) {
+          const referralsQuery = query(
+            collection(db, 'users'),
+            where('referredBy', '==', referralCode)
+          );
+          const referralsSnap = await getDocs(referralsQuery);
+          referralCount = referralsSnap.size;
+        }
+        
+        setUserDetails({
+          joinDate,
+          lastActive,
+          transactions,
+          notifications,
+          accountStatus: userData.isActive ? 'Active' : 'Inactive',
+          verificationStatus: userData.verified || false,
+          referralCode,
+          referralCount
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching user details:', error);
+    } finally {
+      setIsLoadingDetails(false);
+    }
+  };
+
   // Update state when user changes
   useEffect(() => {
     if (currentUser) {
@@ -80,7 +204,7 @@ export default function ProfileScreen() {
       setBrandName(currentUser.brandName || "");
       setAbout(currentUser.about || "");
       setProfileImage(currentUser.profileImage || null);
-      setBrandImage(currentUser.brandImage || null); // Add this line
+      setBrandImage(currentUser.brandImage || null);
       setWhatsappNumber(currentUser.whatsappNumber || "");
       setInstagramHandle(currentUser.instagramHandle || "");
       setLocation(currentUser.location || "");
@@ -103,6 +227,9 @@ export default function ProfileScreen() {
       } else {
         setCatalogueImages([]);
       }
+      
+      // Fetch additional user details
+      fetchUserDetails();
     }
   }, [currentUser]);
 
@@ -272,6 +399,186 @@ export default function ProfileScreen() {
     }
   };
 
+  // Format date to readable string
+  const formatDate = (date: Date | null) => {
+    if (!date) return 'N/A';
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  };
+  
+  // Format timestamp to readable date/time
+  const formatTimestamp = (timestamp: any) => {
+    if (!timestamp) return 'N/A';
+    
+    let date;
+    if (timestamp.seconds) {
+      // Firestore timestamp
+      date = new Date(timestamp.seconds * 1000);
+    } else if (typeof timestamp === 'number') {
+      // Unix timestamp in milliseconds
+      date = new Date(timestamp);
+    } else {
+      return 'Invalid date';
+    }
+    
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 0) {
+      // Today - show time
+      return date.toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } else if (diffDays === 1) {
+      return 'Yesterday';
+    } else if (diffDays < 7) {
+      return `${diffDays} days ago`;
+    } else {
+      return date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric'
+      });
+    }
+  };
+  
+  // Handle opening WhatsApp
+  const openWhatsApp = () => {
+    if (!whatsappNumber) return;
+    
+    let phoneNumber = whatsappNumber;
+    // Remove any non-numeric characters
+    phoneNumber = phoneNumber.replace(/\D/g, '');
+    
+    // Open WhatsApp with the phone number
+    Linking.openURL(`https://wa.me/${phoneNumber}`);
+  };
+  
+  // Handle opening Instagram
+  const openInstagram = () => {
+    if (!instagramHandle) return;
+    
+    // Try to open in Instagram app first
+    Linking.canOpenURL('instagram://user?username=' + instagramHandle)
+      .then(supported => {
+        if (supported) {
+          return Linking.openURL('instagram://user?username=' + instagramHandle);
+        } else {
+          // Fallback to browser
+          return Linking.openURL('https://www.instagram.com/' + instagramHandle);
+        }
+      })
+      .catch(err => console.error('Error opening Instagram:', err));
+  };
+  
+  // Handle opening location
+  const openLocation = () => {
+    if (!location) return;
+    
+    Linking.openURL(location);
+  };
+  
+  // Generate a referral code
+  const generateReferralCode = async () => {
+    if (!currentUser || !currentUser.id) return;
+    
+    try {
+      setIsLoading(true);
+      
+      // Generate a random code
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+      let code = '';
+      for (let i = 0; i < 6; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      
+      // Update user with the new referral code
+      await firestoreService.updateUser(currentUser.id, {
+        referralCode: code
+      });
+      
+      // Update local state
+      setUserDetails(prev => ({
+        ...prev,
+        referralCode: code
+      }));
+      
+      Alert.alert('Success', 'Referral code generated successfully!');
+    } catch (error) {
+      console.error('Error generating referral code:', error);
+      Alert.alert('Error', 'Failed to generate referral code. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  // Share referral code
+  const shareReferralCode = async () => {
+    if (!userDetails.referralCode) return;
+    
+    try {
+      await Share.share({
+        message: `Join me on Bhav App using my referral code: ${userDetails.referralCode}`
+      });
+    } catch (error) {
+      console.error('Error sharing referral code:', error);
+    }
+  };
+  
+  // Copy referral code to clipboard
+  const copyReferralCode = async () => {
+    if (!userDetails.referralCode) return;
+    
+    try {
+      await Clipboard.setStringAsync(userDetails.referralCode);
+      Alert.alert('Copied', 'Referral code copied to clipboard!');
+    } catch (error) {
+      console.error('Error copying referral code:', error);
+    }
+  };
+  
+  // Handle upgrade to seller
+  const handleUpgradeToSeller = () => {
+    if (Platform.OS !== "web") {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+    
+    // Navigate to seller upgrade screen
+    router.push("/seller-upgrade");
+  };
+  
+  // Open drawer navigation
+  const openDrawer = () => {
+    router.push("/drawer");
+  };
+  
+  // Handle logout
+  const handleLogout = async () => {
+    if (Platform.OS !== "web") {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    }
+    
+    try {
+      setIsLoading(true);
+      
+      // Logout from Firebase if available
+      if (firebaseAuth) {
+        await firebaseAuth.signOut();
+      }
+      
+      // Clear local auth state
+      router.push("/");
+    } catch (error) {
+      console.error('Error logging out:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Use a placeholder image if no profile image is set
   const getProfileImage = () => {
     if (profileImage) {
@@ -279,51 +586,15 @@ export default function ProfileScreen() {
     }
     return images.profilePlaceholder;
   };
+  
   // Use a placeholder image if no brand image is set
   const getBrandImage = () => {
     if (brandImage) return brandImage;
   };
 
-  // Handle upgrade to seller
-  const handleUpgradeToSeller = () => {
-    if (Platform.OS !== "web") {
-      Haptics.selectionAsync();
-    }
-
-    if (!currentUser) return;
-
-    // Navigate to subscription page with user ID
-    router.push({
-      pathname: "/auth/subscription",
-      params: { userId: currentUser.id }
-    });
-  };
+  // This function was removed to fix duplicate declaration
   
-  // Handle logout
-  const handleLogout = async () => {
-    try {
-      // Try to log out from Firebase Auth first
-      if (firebaseAuth) {
-        await firebaseAuth.logOut();
-      }
-      
-      // Also log out from legacy auth
-      if (user) {
-        await updateUser({ logout: true });
-      }
-      
-      // Navigate to login screen
-      router.replace("/auth/login");
-    } catch (error) {
-      console.error("Error logging out:", error);
-      Alert.alert("Error", "Failed to log out. Please try again.");
-    }
-  };
-
-  const openDrawer = () => {
-    router.push("/drawer");
-  };
-
+  
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top"]}>
@@ -335,11 +606,42 @@ export default function ProfileScreen() {
         >
           <Menu size={24} color="#333333" />
         </TouchableOpacity>
-        {/* <View style={styles.headerTitleContainer}>
+        <View style={styles.headerTitleContainer}>
           <Text style={styles.headerTitle}>My Profile</Text>
-        </View> */}
+        </View>
+        <TouchableOpacity
+          onPress={() => router.push("/settings")}
+        >
+          <Settings size={24} color="#333333" />
+        </TouchableOpacity>
       </View>
 
+      {/* Tab Navigation */}
+      <View style={styles.tabContainer}>
+        <TouchableOpacity 
+          style={[styles.tabButton, activeTab === 'profile' && styles.activeTabButton]}
+          onPress={() => setActiveTab('profile')}
+        >
+          <User size={16} color={activeTab === 'profile' ? "#F3B62B" : "#666666"} />
+          <Text style={[styles.tabText, activeTab === 'profile' && styles.activeTabText]}>Profile</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.tabButton, activeTab === 'activity' && styles.activeTabButton]}
+          onPress={() => setActiveTab('activity')}
+        >
+          <Clock size={16} color={activeTab === 'activity' ? "#F3B62B" : "#666666"} />
+          <Text style={[styles.tabText, activeTab === 'activity' && styles.activeTabText]}>Activity</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.tabButton, activeTab === 'settings' && styles.activeTabButton]}
+          onPress={() => setActiveTab('settings')}
+        >
+          <Settings size={16} color={activeTab === 'settings' ? "#F3B62B" : "#666666"} />
+          <Text style={[styles.tabText, activeTab === 'settings' && styles.activeTabText]}>Settings</Text>
+        </TouchableOpacity>
+      </View>
 
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -349,13 +651,7 @@ export default function ProfileScreen() {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          <View style={styles.header}>
-            <Text style={styles.headerTitle}>My Profile</Text>
-            <Text style={styles.headerSubtitle}>
-              Manage your personal information
-            </Text>
-          </View>
-
+          {/* Profile Header Section */}
           <View style={styles.profileImageContainer}>
             {/* Brand Cover Image - Only for sellers */}
             {currentUser?.role === 'seller' && (
@@ -431,72 +727,309 @@ export default function ProfileScreen() {
           </View>
 
 
-          {/* Logout Button */}
-          <TouchableOpacity
-            style={styles.logoutButton}
-            onPress={handleLogout}
-          >
-            <Text style={styles.logoutButtonText}>Log Out</Text>
-          </TouchableOpacity>
-          
-          {/* Referral Code Section - Only for sellers */}
-          {/* {currentUser?.role === 'seller' && (
-            <View style={styles.referralCodeContainer}>
-              <View style={styles.referralCodeHeader}>
-                <Text style={styles.referralCodeTitle}>Your Referral Code</Text>
-                {referralCode && (
-                  <TouchableOpacity
-                    style={styles.shareButton}
-                    onPress={handleShareReferralCode}
-                  >
-                    <Share2 size={18} color="#1976D2" />
-                  </TouchableOpacity>
+          {/* Conditional rendering based on active tab */}
+          {activeTab === 'profile' && (
+            <>
+              {/* Account Information Card */}
+              <View style={styles.infoCard}>
+                <View style={styles.infoCardHeader}>
+                  <Text style={styles.infoCardTitle}>Account Information</Text>
+                </View>
+                
+                <View style={styles.infoRow}>
+                  <View style={styles.infoIconContainer}>
+                    <Calendar size={18} color="#F3B62B" />
+                  </View>
+                  <View style={styles.infoContent}>
+                    <Text style={styles.infoLabel}>Member Since</Text>
+                    <Text style={styles.infoValue}>
+                      {isLoadingDetails ? 'Loading...' : formatDate(userDetails.joinDate)}
+                    </Text>
+                  </View>
+                </View>
+                
+                <View style={styles.infoRow}>
+                  <View style={styles.infoIconContainer}>
+                    <Clock size={18} color="#F3B62B" />
+                  </View>
+                  <View style={styles.infoContent}>
+                    <Text style={styles.infoLabel}>Last Active</Text>
+                    <Text style={styles.infoValue}>
+                      {isLoadingDetails ? 'Loading...' : formatDate(userDetails.lastActive)}
+                    </Text>
+                  </View>
+                </View>
+                
+                <View style={styles.infoRow}>
+                  <View style={styles.infoIconContainer}>
+                    <Shield size={18} color="#F3B62B" />
+                  </View>
+                  <View style={styles.infoContent}>
+                    <Text style={styles.infoLabel}>Account Status</Text>
+                    <View style={[
+                      styles.statusBadge,
+                      { backgroundColor: userDetails.accountStatus === 'Active' ? '#E8F5E9' : '#FFEBEE' }
+                    ]}>
+                      <Text style={[
+                        styles.statusText,
+                        { color: userDetails.accountStatus === 'Active' ? '#43A047' : '#E53935' }
+                      ]}>
+                        {userDetails.accountStatus}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+                
+                {currentUser?.role === 'seller' && (
+                  <View style={styles.infoRow}>
+                    <View style={styles.infoIconContainer}>
+                      <Award size={18} color="#F3B62B" />
+                    </View>
+                    <View style={styles.infoContent}>
+                      <Text style={styles.infoLabel}>Seller Status</Text>
+                      <View style={[
+                        styles.statusBadge,
+                        { backgroundColor: userDetails.verificationStatus ? '#E8F5E9' : '#FFF8E1' }
+                      ]}>
+                        <Text style={[
+                          styles.statusText,
+                          { color: userDetails.verificationStatus ? '#43A047' : '#F3B62B' }
+                        ]}>
+                          {userDetails.verificationStatus ? 'Verified' : 'Pending Verification'}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
                 )}
               </View>
-
-              <View style={styles.referralCodeContent}>
-                {referralCode ? (
-                  <>
-                    <Text style={styles.referralCode}>{referralCode}</Text>
+              
+              {/* Referral Code Section */}
+              <View style={styles.infoCard}>
+                <View style={styles.infoCardHeader}>
+                  <Text style={styles.infoCardTitle}>Referral Program</Text>
+                  {userDetails.referralCode && (
                     <TouchableOpacity
-                      style={styles.copyButton}
-                      onPress={handleCopyReferralCode}
+                      style={styles.shareButton}
+                      onPress={shareReferralCode}
                     >
-                      {codeCopied ? (
-                        <Check size={20} color="#4CAF50" />
-                      ) : (
-                        <Copy size={20} color="#1976D2" />
-                      )}
+                      <Share2 size={18} color="#1976D2" />
                     </TouchableOpacity>
+                  )}
+                </View>
+                
+                {userDetails.referralCode ? (
+                  <>
+                    <View style={styles.referralCodeDisplay}>
+                      <Text style={styles.referralCodeText}>{userDetails.referralCode}</Text>
+                      <TouchableOpacity
+                        style={styles.copyButton}
+                        onPress={copyReferralCode}
+                      >
+                        <Copy size={18} color="#1976D2" />
+                      </TouchableOpacity>
+                    </View>
+                    
+                    <View style={styles.infoRow}>
+                      <View style={styles.infoIconContainer}>
+                        <Gift size={18} color="#F3B62B" />
+                      </View>
+                      <View style={styles.infoContent}>
+                        <Text style={styles.infoLabel}>Referrals</Text>
+                        <Text style={styles.infoValue}>{userDetails.referralCount} users</Text>
+                      </View>
+                    </View>
                   </>
                 ) : (
                   <TouchableOpacity
                     style={styles.generateButton}
-                    onPress={handleGenerateReferralCode}
-                    disabled={isGeneratingCode}
+                    onPress={generateReferralCode}
+                    disabled={isLoading}
                   >
-                    {isGeneratingCode ? (
+                    {isLoading ? (
                       <ActivityIndicator size="small" color="#ffffff" />
                     ) : (
-                      <Text style={styles.generateButtonText}>Generate Code</Text>
+                      <>
+                        <Gift size={18} color="#ffffff" style={{ marginRight: 8 }} />
+                        <Text style={styles.generateButtonText}>Generate Referral Code</Text>
+                      </>
                     )}
                   </TouchableOpacity>
                 )}
+                
+                <Text style={styles.referralInfo}>
+                  Share your referral code with friends and earn rewards when they join.
+                </Text>
               </View>
-
-              <Text style={styles.referralCodeInfo}>
-                Share this code with your customers so they can add you as their seller.
-              </Text>
+              
+              <View style={styles.formContainer}>
+                <Text style={styles.formTitle}>Personal Information</Text>
+                
+                {error ? <Text style={styles.errorText}>{error}</Text> : null}
+              </View>
+            </>
+          )}
+          
+          {activeTab === 'activity' && (
+            <View style={styles.activityContainer}>
+              {isLoadingDetails ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color="#F3B62B" />
+                  <Text style={styles.loadingText}>Loading your activity...</Text>
+                </View>
+              ) : (
+                <>
+                  {/* Transactions Section */}
+                  <View style={styles.activitySection}>
+                    <Text style={styles.activitySectionTitle}>Recent Transactions</Text>
+                    
+                    {userDetails.transactions.length > 0 ? (
+                      userDetails.transactions.map((transaction: any, index: number) => (
+                        <View key={transaction.id || index} style={styles.transactionItem}>
+                          <View style={styles.transactionHeader}>
+                            <View style={[
+                              styles.transactionIcon,
+                              { backgroundColor: transaction.status === 'completed' ? '#E8F5E9' : 
+                                transaction.status === 'pending' ? '#FFF8E1' : '#FFEBEE' }
+                            ]}>
+                              <FontAwesome 
+                                name="money" 
+                                size={16} 
+                                color={transaction.status === 'completed' ? '#43A047' : 
+                                  transaction.status === 'pending' ? '#F3B62B' : '#E53935'} 
+                              />
+                            </View>
+                            <View style={styles.transactionInfo}>
+                              <Text style={styles.transactionTitle}>
+                                {transaction.type || 'Transaction'}
+                              </Text>
+                              <Text style={styles.transactionAmount}>
+                                ₹{transaction.amount?.toFixed(2) || '0.00'}
+                              </Text>
+                            </View>
+                            <Text style={styles.transactionDate}>
+                              {formatTimestamp(transaction.timestamp)}
+                            </Text>
+                          </View>
+                        </View>
+                      ))
+                    ) : (
+                      <View style={styles.emptyState}>
+                        <FileText size={40} color="#cccccc" />
+                        <Text style={styles.emptyStateText}>No transactions yet</Text>
+                      </View>
+                    )}
+                  </View>
+                  
+                  {/* Notifications Section */}
+                  <View style={styles.activitySection}>
+                    <Text style={styles.activitySectionTitle}>Recent Notifications</Text>
+                    
+                    {userDetails.notifications.length > 0 ? (
+                      userDetails.notifications.map((notification: any, index: number) => (
+                        <View key={notification.id || index} style={styles.notificationItem}>
+                          <View style={styles.notificationHeader}>
+                            <View style={[
+                              styles.notificationIcon,
+                              { backgroundColor: 
+                                notification.type === 'alert' ? '#FFEBEE' :
+                                notification.type === 'transaction' ? '#FFF8E1' : '#E8F5E9' 
+                              }
+                            ]}>
+                              {notification.type === 'alert' ? (
+                                <AlertCircle size={16} color="#E53935" />
+                              ) : notification.type === 'transaction' ? (
+                                <FontAwesome name="money" size={16} color="#F3B62B" />
+                              ) : (
+                                <Info size={16} color="#43A047" />
+                              )}
+                            </View>
+                            <View style={styles.notificationInfo}>
+                              <Text style={styles.notificationTitle}>
+                                {notification.title || 'Notification'}
+                              </Text>
+                              <Text style={styles.notificationMessage}>
+                                {notification.message}
+                              </Text>
+                            </View>
+                          </View>
+                          <Text style={styles.notificationDate}>
+                            {formatTimestamp(notification.timestamp)}
+                          </Text>
+                        </View>
+                      ))
+                    ) : (
+                      <View style={styles.emptyState}>
+                        <Bell size={40} color="#cccccc" />
+                        <Text style={styles.emptyStateText}>No notifications yet</Text>
+                      </View>
+                    )}
+                  </View>
+                </>
+              )}
             </View>
-          )} */}
+          )}
+          
+          {activeTab === 'settings' && (
+            <View style={styles.settingsContainer}>
+              {/* Account Settings */}
+              <View style={styles.settingsSection}>
+                <Text style={styles.settingsSectionTitle}>Account Settings</Text>
+                
+                <TouchableOpacity style={styles.settingsItem}>
+                  <View style={styles.settingsItemIcon}>
+                    <Shield size={20} color="#F3B62B" />
+                  </View>
+                  <View style={styles.settingsItemContent}>
+                    <Text style={styles.settingsItemTitle}>Security</Text>
+                    <Text style={styles.settingsItemDescription}>
+                      Change password, enable 2FA
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+                
+                <TouchableOpacity style={styles.settingsItem}>
+                  <View style={styles.settingsItemIcon}>
+                    <Bell size={20} color="#F3B62B" />
+                  </View>
+                  <View style={styles.settingsItemContent}>
+                    <Text style={styles.settingsItemTitle}>Notifications</Text>
+                    <Text style={styles.settingsItemDescription}>
+                      Manage notification preferences
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+                
+                <TouchableOpacity style={styles.settingsItem}>
+                  <View style={styles.settingsItemIcon}>
+                    <HelpCircle size={20} color="#F3B62B" />
+                  </View>
+                  <View style={styles.settingsItemContent}>
+                    <Text style={styles.settingsItemTitle}>Help & Support</Text>
+                    <Text style={styles.settingsItemDescription}>
+                      Contact us, FAQs, report issues
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+              
+              {/* Logout Button */}
+              <TouchableOpacity
+                style={styles.logoutButton}
+                onPress={handleLogout}
+              >
+                <Text style={styles.logoutButtonText}>Log Out</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
-          <View style={styles.formContainer}>
-            <Text style={styles.formTitle}>Personal Information</Text>
-
-            {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Full Name</Text>
+          {activeTab === 'profile' && (
+            <View style={styles.formContainer}>
+              <Text style={styles.formTitle}>Personal Information</Text>
+              
+              {error ? <Text style={styles.errorText}>{error}</Text> : null}
+              
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Full Name</Text>
               <View style={styles.inputContainer}>
                 <User size={20} color="#F3B62B" style={styles.inputIcon} />
                 <TextInput
@@ -748,10 +1281,11 @@ export default function ProfileScreen() {
                 <Text style={styles.savedMessageText}>Profile updated successfully!</Text>
               </View>
             )}
-          </View>
+            </View>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView >
+    </SafeAreaView>
   );
 }
 
@@ -768,8 +1302,17 @@ const styles = StyleSheet.create({
     paddingBottom: 100,
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  headerTitleContainer: {
+    flex: 1,
+    alignItems: 'center',
   },
   headerTitle: {
     fontSize: 18,
@@ -784,6 +1327,308 @@ const styles = StyleSheet.create({
     color: "#ff3b30",
     marginBottom: 16,
     fontSize: 14,
+  },
+  
+  // Tab Navigation
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#ffffff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    paddingHorizontal: 10,
+  },
+  tabButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  activeTabButton: {
+    borderBottomColor: '#F3B62B',
+  },
+  tabText: {
+    fontSize: 14,
+    color: '#666666',
+    marginLeft: 6,
+  },
+  activeTabText: {
+    color: '#F3B62B',
+    fontWeight: 'bold',
+  },
+  
+  // Loading Container
+  loadingContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#666666',
+    marginTop: 15,
+  },
+  
+  // Info Card Styles
+  infoCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    marginHorizontal: 20,
+    marginBottom: 20,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  infoCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  infoCardTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333333',
+  },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  infoIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#FFF8E1',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  infoContent: {
+    flex: 1,
+  },
+  infoLabel: {
+    fontSize: 14,
+    color: '#666666',
+  },
+  infoValue: {
+    fontSize: 16,
+    color: '#333333',
+    fontWeight: '500',
+  },
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+    marginTop: 4,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  
+  // Referral Code Styles
+  referralCodeDisplay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  referralCodeText: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333333',
+    letterSpacing: 1,
+  },
+  copyButton: {
+    padding: 8,
+  },
+  shareButton: {
+    padding: 8,
+  },
+  generateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3B62B',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  generateButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  referralInfo: {
+    fontSize: 14,
+    color: '#666666',
+    lineHeight: 20,
+  },
+  
+  // Activity Styles
+  activityContainer: {
+    padding: 20,
+  },
+  activitySection: {
+    marginBottom: 24,
+  },
+  activitySectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333333',
+    marginBottom: 16,
+  },
+  transactionItem: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  transactionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  transactionIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  transactionInfo: {
+    flex: 1,
+  },
+  transactionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333333',
+  },
+  transactionAmount: {
+    fontSize: 14,
+    color: '#666666',
+  },
+  transactionDate: {
+    fontSize: 12,
+    color: '#999999',
+    marginTop: 8,
+  },
+  notificationItem: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  notificationHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  notificationIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  notificationInfo: {
+    flex: 1,
+  },
+  notificationTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333333',
+  },
+  notificationMessage: {
+    fontSize: 14,
+    color: '#666666',
+    marginTop: 4,
+  },
+  notificationDate: {
+    fontSize: 12,
+    color: '#999999',
+    marginTop: 8,
+    alignSelf: 'flex-end',
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  emptyStateText: {
+    fontSize: 16,
+    color: '#999999',
+    marginTop: 12,
+  },
+  
+  // Settings Styles
+  settingsContainer: {
+    padding: 20,
+  },
+  settingsSection: {
+    marginBottom: 24,
+  },
+  settingsSectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333333',
+    marginBottom: 16,
+  },
+  settingsItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  settingsItemIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFF8E1',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  settingsItemContent: {
+    flex: 1,
+  },
+  settingsItemTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333333',
+  },
+  settingsItemDescription: {
+    fontSize: 14,
+    color: '#666666',
+    marginTop: 4,
   },
   profileImageContainer: {
     alignItems: "center",

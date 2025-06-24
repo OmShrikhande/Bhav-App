@@ -69,6 +69,8 @@ export default function LoginScreen() {
         // Navigate to the appropriate dashboard based on user role
         if (firebaseAuth.user?.role === 'admin' || firebaseAuth.user?.username === ADMIN_USERNAME) {
           console.log("Login: User is admin, navigating to admin dashboard");
+          // Store admin user in AsyncStorage for the admin layout
+          await AsyncStorage.setItem('admin-user', JSON.stringify(firebaseAuth.user));
           router.replace("/(admin)/dashboard");
         } else if (firebaseAuth.user?.role === 'seller') {
           console.log("Login: User is seller, navigating to seller dashboard");

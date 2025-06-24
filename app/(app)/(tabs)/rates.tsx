@@ -348,10 +348,13 @@ export default function RatesScreen() {
     }).then(() => setFontsLoaded(true));
   }, []);
   
-  // Fetch rates from Firestore when component mounts
+  // Fetch rates from Firestore when component mounts and user is logged in
   useEffect(() => {
-    fetchRates();
-  }, []);
+    // Only fetch rates if user is logged in
+    if (currentUser) {
+      fetchRates();
+    }
+  }, [currentUser]);
 
   useFocusEffect(
     useCallback(() => {
