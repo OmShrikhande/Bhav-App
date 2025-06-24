@@ -683,7 +683,10 @@ export const useAuthStore = create<AuthState>()(
         return { success: true, userId: newUser.id };
       },
 
-      logout: () => {
+      logout: async () => {
+        console.log("Legacy auth store: Starting logout process");
+        
+        // Clear all state
         set({
           user: null,
           isAuthenticated: false,
@@ -692,6 +695,16 @@ export const useAuthStore = create<AuthState>()(
           contactedDealers: [], // Reset contacted dealers on logout
           contactedSellerDetails: [], // Reset contacted seller details on logout
         });
+        
+        // Clear persisted state
+        try {
+          await AsyncStorage.removeItem('auth-storage');
+          console.log("Legacy auth store: Cleared persisted state");
+        } catch (storageError) {
+          console.error("Legacy auth store: Error clearing persisted state:", storageError);
+        }
+        
+        console.log("Legacy auth store: Logout complete");
       },
 
       updateUser: async (userData) => {

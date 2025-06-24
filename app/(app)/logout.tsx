@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
 import { useAuth } from "@/context/auth-context";
 import { useRouter } from "expo-router";
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { auth } from '@/config/firebaseConfig';
 
 export default function LogoutScreen() {
   const { logout, firebaseAuth } = useAuth();
@@ -15,34 +16,104 @@ export default function LogoutScreen() {
         // Add a small delay to show the loading indicator
         await new Promise(resolve => setTimeout(resolve, 500));
         
-        // Logout from Firebase first
-        const firebaseResult = await firebaseAuth.logOut();
-        if (!firebaseResult.success) {
-          console.error("Firebase logout error:", firebaseResult.error);
-        }
+        console.log("Starting logout process...");
         
-        // Then logout from the legacy system
-        logout();
+        // Use the enhanced logout function which handles everything
+        console.log("Using enhanced logout function...");
+        await logout();
         
-        // Clear any persisted auth data
+        console.log("Logout complete, navigating to login screen...");
+        
+        // Force clear any remaining auth state
         try {
-          await AsyncStorage.removeItem('firebase-auth-storage');
-        } catch (storageError) {
-          console.error('Error clearing auth storage:', storageError);
+          console.log("Force clearing any remaining auth state");
+          
+          // Force reset of auth stores directly
+          const { useFirebaseAuthStore } = await import('@/store/firebase-auth-store');
+          const { useAuthStore } = await import('@/store/auth-store');
+          
+          useFirebaseAuthStore.setState({
+            user: null,
+            firebaseUser: null,
+            isAuthenticated: false,
+            isLoading: false,
+            error: null
+          });
+          
+          useAuthStore.setState({
+            user: null,
+            isAuthenticated: false,
+            token: null,
+            isPremiumUser: false,
+            contactedDealers: [],
+            contactedSellerDetails: []
+          });
+        } catch (resetError) {
+          console.error("Error resetting auth stores:", resetError);
         }
         
-        // Navigate to login screen
-        router.replace("/auth/login");
+        // Navigate to login screen with a delay to ensure all logout processes complete
+        setTimeout(async () => {
+          // Clear the logout in progress flag
+          try {
+            await AsyncStorage.removeItem('logout-in-progress');
+            console.log("Cleared logout in progress flag");
+          } catch (error) {
+            console.error("Error clearing logout flag:", error);
+          }
+          
+          // Force navigation to login and clear navigation history
+          router.replace("/auth/login");
+        }, 1000);
       } catch (err: any) {
         console.error("Logout error:", err);
         setError(err.message || "Failed to log out. Please try again.");
+        // Still try to force clear auth state even in error case
+        try {
+          console.log("Force clearing any remaining auth state (error case)");
+          
+          // Force reset of auth stores directly
+          const { useFirebaseAuthStore } = await import('@/store/firebase-auth-store');
+          const { useAuthStore } = await import('@/store/auth-store');
+          
+          useFirebaseAuthStore.setState({
+            user: null,
+            firebaseUser: null,
+            isAuthenticated: false,
+            isLoading: false,
+            error: null
+          });
+          
+          useAuthStore.setState({
+            user: null,
+            isAuthenticated: false,
+            token: null,
+            isPremiumUser: false,
+            contactedDealers: [],
+            contactedSellerDetails: []
+          });
+        } catch (resetError) {
+          console.error("Error resetting auth stores (error case):", resetError);
+        }
+        
         // Still redirect to login after a delay even if there's an error
-        setTimeout(() => router.replace("/auth/login"), 2000);
+        setTimeout(async () => {
+          // Clear the logout in progress flag
+          try {
+            await AsyncStorage.removeItem('logout-in-progress');
+            console.log("Cleared logout in progress flag (error case)");
+          } catch (flagError) {
+            console.error("Error clearing logout flag:", flagError);
+          }
+          
+          // Force navigation to login and clear navigation history
+          router.replace("/auth/login");
+        }, 2000);
       }
     };
 
     performLogout();
-  }, [logout, router, firebaseAuth]);
+  }, []);
 
   return (
     <View style={styles.container}>

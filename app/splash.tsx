@@ -18,8 +18,96 @@ export default function SplashScreen() {
   useEffect(() => {
     const checkAuthState = async () => {
       try {
+        // First, check if we're in a logout state or have a stale logout flag
+        let isLoggingOut = false;
+        let forceLogout = false;
+        
+        try {
+          const logoutState = await AsyncStorage.getItem('logout-in-progress');
+          isLoggingOut = logoutState === 'true';
+          console.log("Splash: Logout in progress:", isLoggingOut);
+          
+          // Check for inconsistent auth state (one store has user, other doesn't)
+          const firebaseState = useFirebaseAuthStore.getState();
+          const legacyState = useAuthStore.getState();
+          
+          if ((firebaseState.isAuthenticated && !legacyState.isAuthenticated) || 
+              (!firebaseState.isAuthenticated && legacyState.isAuthenticated)) {
+            console.log("Splash: Inconsistent auth state detected, forcing logout");
+            forceLogout = true;
+          }
+          
+          // If we find a stale logout flag or inconsistent state, clear everything
+          if (isLoggingOut || forceLogout) {
+            console.log("Splash: Found stale logout flag or inconsistent state, clearing auth state");
+            
+            // Clear the logout flag
+            await AsyncStorage.removeItem('logout-in-progress');
+            
+            // Clear all auth storage
+            const keys = [
+              'firebase-auth-storage',
+              'auth-storage',
+              'zustand-auth-storage',
+              'auth-state'
+            ];
+            
+            for (const key of keys) {
+              await AsyncStorage.removeItem(key);
+            }
+            
+            // Try to clear all storage as a last resort
+            try {
+              const allKeys = await AsyncStorage.getAllKeys();
+              const authKeys = allKeys.filter(key => 
+                key.includes('auth') || 
+                key.includes('firebase') || 
+                key.includes('user') ||
+                key.includes('zustand')
+              );
+              
+              if (authKeys.length > 0) {
+                console.log("Splash: Clearing all auth-related keys:", authKeys);
+                await AsyncStorage.multiRemove(authKeys);
+              }
+            } catch (clearError) {
+              console.error("Splash: Error clearing all auth keys:", clearError);
+            }
+            
+            // Force reset of auth stores
+            useFirebaseAuthStore.setState({
+              user: null,
+              firebaseUser: null,
+              isAuthenticated: false,
+              isLoading: false,
+              error: null
+            });
+            
+            useAuthStore.setState({
+              user: null,
+              isAuthenticated: false,
+              token: null,
+              isPremiumUser: false,
+              contactedDealers: [],
+              contactedSellerDetails: []
+            });
+            
+            // Set as not authenticated
+            setAuthState({
+              isAuthenticated: false,
+              user: null
+            });
+            return;
+          }
+        } catch (error) {
+          console.error("Splash: Error checking logout state:", error);
+        }
+        
         // Check Firebase auth state first
         const firebaseState = useFirebaseAuthStore.getState();
+        console.log("Splash: Firebase auth state:", 
+          firebaseState.isAuthenticated ? "Authenticated" : "Not authenticated",
+          "User:", firebaseState.user?.id);
         
         if (firebaseState.isAuthenticated && firebaseState.user) {
           setAuthState({
@@ -31,6 +119,9 @@ export default function SplashScreen() {
         
         // If not authenticated in Firebase, check legacy auth
         const legacyState = useAuthStore.getState();
+        console.log("Splash: Legacy auth state:", 
+          legacyState.isAuthenticated ? "Authenticated" : "Not authenticated",
+          "User:", legacyState.user?.id);
         
         if (legacyState.isAuthenticated && legacyState.user) {
           setAuthState({
@@ -41,12 +132,13 @@ export default function SplashScreen() {
         }
         
         // If not authenticated in either, set as not authenticated
+        console.log("Splash: No authenticated user found");
         setAuthState({
           isAuthenticated: false,
           user: null
         });
       } catch (error) {
-        console.error('Error checking auth state:', error);
+        console.error('Splash: Error checking auth state:', error);
         // Default to not authenticated if there's an error
         setAuthState({
           isAuthenticated: false,
@@ -120,11 +212,18 @@ export default function SplashScreen() {
           setTimeout(() => {
             // Navigate based on user role
             if (authState.user?.role === 'seller') {
-              router.push("/(app)/(tabs)/seller-dashboard");
+              console.log("Splash: User is a seller, navigating to seller dashboard");
+              // For sellers, we need to ensure they go to the seller dashboard tab
+              // Use a more direct approach to ensure navigation works
+              router.replace({
+                pathname: "/(app)/(tabs)/seller-dashboard"
+              });
             } else if (authState.user?.role === 'admin') {
-              router.push("/(admin)/dashboard");
+              console.log("Splash: User is an admin, navigating to admin dashboard");
+              router.replace("/(admin)/dashboard");
             } else {
-              router.push("/(app)/(tabs)/dashboard");
+              console.log("Splash: User is a customer, navigating to customer dashboard");
+              router.replace("/(app)/(tabs)/dashboard");
             }
           }, 300);
         } else {

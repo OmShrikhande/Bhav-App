@@ -2,7 +2,7 @@ import React from "react";
 import { Tabs } from "expo-router";
 import { Platform, View, StyleSheet, TouchableOpacity } from "react-native";
 import { BlurView } from "expo-blur";
-import { Home, TrendingUp, Calculator, Phone, CreditCard, Menu, Users, Newspaper, User, Bell } from "lucide-react-native";
+import { Home, TrendingUp, Calculator, Phone, CreditCard, Menu, Users, Newspaper, User, Bell, ShoppingBag } from "lucide-react-native";
 import { useAuth } from "@/context/auth-context";
 import { useRouter } from "expo-router";
 
@@ -13,14 +13,34 @@ export default function TabsLayout() {
   // Get user from either auth store
   const currentUser = firebaseAuth.user || user;
   
-  // Add debugging
+  // Add debugging and authentication check
   React.useEffect(() => {
     console.log("TabsLayout mounted");
     console.log("Current user in tabs:", currentUser);
     console.log("User role:", currentUser?.role);
     console.log("Firebase user in tabs:", firebaseAuth.user);
     console.log("Legacy user in tabs:", user);
-  }, [currentUser, firebaseAuth.user, user]);
+    
+    // If no user is found, redirect to login
+    if (!currentUser) {
+      console.log("No user found in tabs, redirecting to login");
+      // Use a timeout to avoid navigation during render
+      setTimeout(() => {
+        router.replace("/auth/login");
+      }, 100);
+    }
+    
+    // If user is a seller, redirect to seller dashboard
+    if (currentUser?.role === "seller") {
+      console.log("Seller user detected, redirecting to seller dashboard");
+      // Use a timeout to avoid navigation during render
+      setTimeout(() => {
+        if (router.pathname === "/(app)/(tabs)/dashboard") {
+          router.replace("/(app)/(tabs)/seller-dashboard");
+        }
+      }, 100);
+    }
+  }, [currentUser, firebaseAuth.user, user, router.pathname]);
   
   const isSeller = currentUser?.role === "seller";
   const isCustomer = currentUser?.role === "customer";
@@ -93,6 +113,21 @@ export default function TabsLayout() {
               <Home size={22} color={color} />
             </View>
           ),
+          href: isSeller ? null : "/(app)/(tabs)/dashboard",
+        }}
+      />
+      
+      <Tabs.Screen
+        name="seller-dashboard"
+        options={{
+          title: "Seller Dashboard",
+          // headerShown: true,
+          tabBarIcon: ({ color, focused }) => (
+            <View style={focused ? styles.activeIconContainer : null}>
+              <ShoppingBag size={22} color={color} />
+            </View>
+          ),
+          href: isSeller ? "/(app)/(tabs)/seller-dashboard" : null,
         }}
       />
 
@@ -108,6 +143,34 @@ export default function TabsLayout() {
               <TrendingUp size={22} color={color} />
             </View>
           ),
+        }}
+      />
+      
+      <Tabs.Screen
+        name="inventory"
+        options={{
+          title: "Inventory",
+          // headerShown: true,
+          tabBarIcon: ({ color, focused }) => (
+            <View style={focused ? styles.activeIconContainer : null}>
+              <ShoppingBag size={22} color={color} />
+            </View>
+          ),
+          href: isSeller ? "/(app)/(tabs)/inventory" : null,
+        }}
+      />
+      
+      <Tabs.Screen
+        name="customers"
+        options={{
+          title: "Customers",
+          // headerShown: true,
+          tabBarIcon: ({ color, focused }) => (
+            <View style={focused ? styles.activeIconContainer : null}>
+              <Users size={22} color={color} />
+            </View>
+          ),
+          href: isSeller ? "/(app)/(tabs)/customers" : null,
         }}
       />
 

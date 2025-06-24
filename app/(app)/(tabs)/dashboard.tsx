@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -8,14 +8,16 @@ import {
   ActivityIndicator,
   RefreshControl,
   Alert,
-  Image
+  Image,
+  Animated
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { useAuth } from "@/context/auth-context";
 import { useRouter } from "expo-router";
 import { firestoreService } from "@/services/firestore";
-import { Home, TrendingUp, Bell, User, Settings, Package, Users, Menu } from "lucide-react-native";
+import { Home, TrendingUp, TrendingDown, Bell, User, Settings, Package, Users, Menu } from "lucide-react-native";
+import { useMetalPrices } from "@/hooks/useMetalPrices";
 
 export default function DashboardScreen() {
   const { user, firebaseAuth } = useAuth();
@@ -30,7 +32,16 @@ export default function DashboardScreen() {
     console.log("Current user:", currentUser);
     console.log("Firebase user:", firebaseAuth.user);
     console.log("Legacy user:", user);
-  }, []);
+    
+    // If no user is found, redirect to login
+    if (!currentUser) {
+      console.log("No user found in dashboard, redirecting to login");
+      // Use a timeout to avoid navigation during render
+      setTimeout(() => {
+        router.replace("/auth/login");
+      }, 100);
+    }
+  }, [currentUser]);
   
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -39,35 +50,43 @@ export default function DashboardScreen() {
   const [sellers, setSellers] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   
+  // Get real-time metal prices
+  const { prices, refreshPrices } = useMetalPrices();
+  
+  // Animation values for price changes
+  const goldPriceAnim = useRef(new Animated.Value(1)).current;
+  const silverPriceAnim = useRef(new Animated.Value(1)).current;
+  
+  // Previous prices for comparison
+  const prevGoldPrice = useRef<string | null>(null);
+  const prevSilverPrice = useRef<string | null>(null);
+  
   const fetchData = async () => {
     setLoading(true);
     try {
-      // Fetch latest rates - with more detailed logging
+      // Fetch latest rates from Firestore for historical data
       console.log("Fetching latest rates...");
       const latestRates = await firestoreService.getLatestRates();
       console.log("Latest rates received:", latestRates);
       
-      // If no rates from Firestore, use hardcoded demo rates
-      if (!latestRates) {
-        console.log("No rates from Firestore, using demo rates");
-        const demoRates = {
-          gold24k: 6500,
-          gold22k: 6000,
-          silver: 85,
-          timestamp: new Date(),
-          gold: {
-            buy: 6500,
-            sell: 6000
-          },
-          silver: {
-            buy: 85,
-            sell: 80
-          }
-        };
-        setRates(demoRates);
-      } else {
-        setRates(latestRates);
-      }
+      // Create a combined rates object using real-time prices and Firestore data
+      const combinedRates = {
+        gold24k: prices.gold?.buy ? parseFloat(prices.gold.buy) : (latestRates?.gold24k || 6500),
+        gold22k: prices.gold?.sell ? parseFloat(prices.gold.sell) : (latestRates?.gold22k || 6000),
+        silver: prices.silver?.buy ? parseFloat(prices.silver.buy) : (latestRates?.silver || 85),
+        timestamp: new Date(),
+        gold: {
+          buy: prices.gold?.buy ? parseFloat(prices.gold.buy) : (latestRates?.gold?.buy || 6500),
+          sell: prices.gold?.sell ? parseFloat(prices.gold.sell) : (latestRates?.gold?.sell || 6000)
+        },
+        silver: {
+          buy: prices.silver?.buy ? parseFloat(prices.silver.buy) : (latestRates?.silver?.buy || 85),
+          sell: prices.silver?.sell ? parseFloat(prices.silver.sell) : (latestRates?.silver?.sell || 80)
+        },
+        lastUpdated: prices.lastUpdated || formatDate(latestRates?.timestamp)
+      };
+      
+      setRates(combinedRates);
       
       // Fetch notifications for the current user
       if (currentUser?.id) {
@@ -89,21 +108,22 @@ export default function DashboardScreen() {
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
       
-      // Set fallback rates if there's an error
+      // Set fallback rates if there's an error, still using real-time prices if available
       console.log("Error fetching rates, using fallback rates");
       const fallbackRates = {
-        gold24k: 6500,
-        gold22k: 6000,
-        silver: 85,
+        gold24k: prices.gold?.buy ? parseFloat(prices.gold.buy) : 6500,
+        gold22k: prices.gold?.sell ? parseFloat(prices.gold.sell) : 6000,
+        silver: prices.silver?.buy ? parseFloat(prices.silver.buy) : 85,
         timestamp: new Date(),
         gold: {
-          buy: 6500,
-          sell: 6000
+          buy: prices.gold?.buy ? parseFloat(prices.gold.buy) : 6500,
+          sell: prices.gold?.sell ? parseFloat(prices.gold.sell) : 6000
         },
         silver: {
-          buy: 85,
-          sell: 80
-        }
+          buy: prices.silver?.buy ? parseFloat(prices.silver.buy) : 85,
+          sell: prices.silver?.sell ? parseFloat(prices.silver.sell) : 80
+        },
+        lastUpdated: prices.lastUpdated || new Date().toLocaleString()
       };
       setRates(fallbackRates);
     } finally {
@@ -116,8 +136,73 @@ export default function DashboardScreen() {
     fetchData();
   }, [currentUser?.id]);
   
+  // Update rates whenever real-time prices change
+  useEffect(() => {
+    if (prices.gold?.buy && prices.silver?.buy) {
+      // Create a combined rates object using real-time prices
+      const realtimeRates = {
+        gold24k: prices.gold?.buy ? parseFloat(prices.gold.buy) : (rates?.gold24k || 6500),
+        gold22k: prices.gold?.sell ? parseFloat(prices.gold.sell) : (rates?.gold22k || 6000),
+        silver: prices.silver?.buy ? parseFloat(prices.silver.buy) : (rates?.silver || 85),
+        timestamp: new Date(),
+        gold: {
+          buy: prices.gold?.buy ? parseFloat(prices.gold.buy) : (rates?.gold?.buy || 6500),
+          sell: prices.gold?.sell ? parseFloat(prices.gold.sell) : (rates?.gold?.sell || 6000),
+          isUp: prices.gold?.isUp
+        },
+        silver: {
+          buy: prices.silver?.buy ? parseFloat(prices.silver.buy) : (rates?.silver?.buy || 85),
+          sell: prices.silver?.sell ? parseFloat(prices.silver.sell) : (rates?.silver?.sell || 80),
+          isUp: prices.silver?.isUp
+        },
+        lastUpdated: prices.lastUpdated || formatDate(rates?.timestamp)
+      };
+      
+      // Check if gold price has changed
+      if (prevGoldPrice.current !== prices.gold.buy) {
+        // Animate gold price change
+        Animated.sequence([
+          Animated.timing(goldPriceAnim, {
+            toValue: 1.2,
+            duration: 300,
+            useNativeDriver: true
+          }),
+          Animated.timing(goldPriceAnim, {
+            toValue: 1,
+            duration: 300,
+            useNativeDriver: true
+          })
+        ]).start();
+        
+        prevGoldPrice.current = prices.gold.buy;
+      }
+      
+      // Check if silver price has changed
+      if (prevSilverPrice.current !== prices.silver.buy) {
+        // Animate silver price change
+        Animated.sequence([
+          Animated.timing(silverPriceAnim, {
+            toValue: 1.2,
+            duration: 300,
+            useNativeDriver: true
+          }),
+          Animated.timing(silverPriceAnim, {
+            toValue: 1,
+            duration: 300,
+            useNativeDriver: true
+          })
+        ]).start();
+        
+        prevSilverPrice.current = prices.silver.buy;
+      }
+      
+      setRates(realtimeRates);
+    }
+  }, [prices]);
+  
   const onRefresh = () => {
     setRefreshing(true);
+    refreshPrices(); // Refresh real-time prices
     fetchData();
   };
   
@@ -158,7 +243,7 @@ export default function DashboardScreen() {
           <Menu size={24} color="#333" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Dashboard</Text>
-        <TouchableOpacity onPress={() => router.push("/(app)/profile")}>
+        <TouchableOpacity onPress={() => router.push(currentUser ? "/(app)/profile" : "/auth/login")}>
           <View style={styles.profileIcon}>
             {currentUser?.profileImage ? (
               <Image 
@@ -181,15 +266,22 @@ export default function DashboardScreen() {
         }
       >
         {/* Welcome Section */}
-        <View style={styles.welcomeSection}>
-          <Text style={styles.welcomeText}>
-            Welcome, {currentUser?.name || 'User'}!
-          </Text>
-          <Text style={styles.roleText}>
-            {currentUser?.role === 'admin' ? 'Administrator' : 
-             currentUser?.role === 'seller' ? 'Seller' : 'Customer'}
-          </Text>
-        </View>
+        {currentUser ? (
+          <View style={styles.welcomeSection}>
+            <Text style={styles.welcomeText}>
+              Welcome, {currentUser.name || currentUser.fullName || 'User'}!
+            </Text>
+            <Text style={styles.roleText}>
+              {currentUser.role === 'admin' ? 'Administrator' : 
+               currentUser.role === 'seller' ? 'Seller' : 'Customer'}
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.welcomeSection}>
+            <Text style={styles.welcomeText}>Welcome!</Text>
+            <Text style={styles.roleText}>Please log in to continue</Text>
+          </View>
+        )}
         
         {/* Live Rates Section */}
         <View style={styles.sectionContainer}>
@@ -203,7 +295,25 @@ export default function DashboardScreen() {
               <>
                 <View style={styles.rateItem}>
                   <Text style={styles.rateLabel}>Gold (24K)</Text>
-                  <Text style={styles.rateValue}>₹ {rates.gold24k || (rates.gold && rates.gold.buy) || 6500}</Text>
+                  <View style={styles.rateValueContainer}>
+                    <Animated.Text 
+                      style={[
+                        styles.rateValue, 
+                        rates.gold?.isUp ? styles.rateUp : rates.gold?.isUp === false ? styles.rateDown : null,
+                        { transform: [{ scale: goldPriceAnim }] }
+                      ]}
+                    >
+                      ₹ {rates.gold24k || (rates.gold && rates.gold.buy) || 6500}
+                    </Animated.Text>
+                    {rates.gold?.isUp !== undefined && (
+                      <View style={styles.rateIndicator}>
+                        {rates.gold.isUp ? 
+                          <TrendingUp size={14} color="#4CAF50" /> : 
+                          <TrendingDown size={14} color="#F44336" />
+                        }
+                      </View>
+                    )}
+                  </View>
                 </View>
                 <View style={styles.rateItem}>
                   <Text style={styles.rateLabel}>Gold (22K)</Text>
@@ -211,10 +321,28 @@ export default function DashboardScreen() {
                 </View>
                 <View style={styles.rateItem}>
                   <Text style={styles.rateLabel}>Silver</Text>
-                  <Text style={styles.rateValue}>₹ {(typeof rates.silver === 'number' ? rates.silver : (rates.silver && rates.silver.buy)) || 85}</Text>
+                  <View style={styles.rateValueContainer}>
+                    <Animated.Text 
+                      style={[
+                        styles.rateValue, 
+                        rates.silver?.isUp ? styles.rateUp : rates.silver?.isUp === false ? styles.rateDown : null,
+                        { transform: [{ scale: silverPriceAnim }] }
+                      ]}
+                    >
+                      ₹ {(typeof rates.silver === 'number' ? rates.silver : (rates.silver && rates.silver.buy)) || 85}
+                    </Animated.Text>
+                    {rates.silver?.isUp !== undefined && (
+                      <View style={styles.rateIndicator}>
+                        {rates.silver.isUp ? 
+                          <TrendingUp size={14} color="#4CAF50" /> : 
+                          <TrendingDown size={14} color="#F44336" />
+                        }
+                      </View>
+                    )}
+                  </View>
                 </View>
                 <Text style={styles.rateTimestamp}>
-                  Last updated: {formatDate(rates.timestamp)}
+                  Last updated: {rates.lastUpdated || formatDate(rates.timestamp)}
                 </Text>
               </>
             ) : (
@@ -376,6 +504,19 @@ export default function DashboardScreen() {
 }
 
 const styles = StyleSheet.create({
+  rateValueContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  rateIndicator: {
+    marginLeft: 6,
+  },
+  rateUp: {
+    color: '#4CAF50',
+  },
+  rateDown: {
+    color: '#F44336',
+  },
   container: {
     flex: 1,
     backgroundColor: "#f8f9fa",
@@ -488,8 +629,8 @@ const styles = StyleSheet.create({
     color: '#555',
   },
   rateValue: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 18,
+    fontWeight: '700',
     color: '#333',
   },
   rateTimestamp: {
@@ -497,6 +638,7 @@ const styles = StyleSheet.create({
     color: '#888',
     marginTop: 8,
     textAlign: 'right',
+    fontStyle: 'italic',
   },
   notificationsContainer: {
     backgroundColor: '#f9f9f9',

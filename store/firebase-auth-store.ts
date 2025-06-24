@@ -288,23 +288,48 @@ export const useFirebaseAuthStore = create<FirebaseAuthState>()(
         set({ isLoading: true, error: null });
         
         try {
+          console.log("Firebase auth store: Starting logout process");
+          
           // Sign out from Firebase Auth
-          await signOut(auth);
+          try {
+            await signOut(auth);
+            console.log("Firebase auth store: Signed out from Firebase Auth");
+          } catch (signOutError) {
+            console.error("Firebase auth store: Error signing out from Firebase Auth:", signOutError);
+            // Continue with logout even if Firebase signOut fails
+          }
           
           // Clear user state
           set({
             user: null,
             firebaseUser: null,
             isAuthenticated: false,
-            isLoading: false
+            isLoading: false,
+            error: null
           });
           
+          // Clear persisted state
+          try {
+            await AsyncStorage.removeItem('firebase-auth-storage');
+            console.log("Firebase auth store: Cleared persisted state");
+          } catch (storageError) {
+            console.error("Firebase auth store: Error clearing persisted state:", storageError);
+          }
+          
+          console.log("Firebase auth store: Logout complete");
           return { success: true };
         } catch (error: any) {
+          console.error("Firebase auth store: Logout error:", error);
+          
+          // Still clear the state even if there's an error
           set({ 
-            isLoading: false, 
-            error: error.message || 'Failed to log out' 
+            user: null,
+            firebaseUser: null,
+            isAuthenticated: false,
+            isLoading: false,
+            error: error.message || 'Failed to log out'
           });
+          
           return { success: false, error: error.message || 'Failed to log out' };
         }
       },

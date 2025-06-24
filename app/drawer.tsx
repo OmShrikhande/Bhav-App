@@ -196,7 +196,7 @@ export default function DrawerScreen() {
                 <>
                   <TouchableOpacity
                     style={styles.menuItem}
-                    onPress={() => handleNavigation("/(app)/(tabs)/dashboard")}
+                    onPress={() => handleNavigation("/(app)/(tabs)/seller-dashboard")}
                   >
                     <View style={styles.menuIconContainer}>
                       <Home size={22} color="#333333" />
@@ -236,7 +236,7 @@ export default function DrawerScreen() {
 
                   <TouchableOpacity
                     style={styles.menuItem}
-                    onPress={() => handleNavigation("/(app)/customers")}
+                    onPress={() => handleNavigation("/(app)/(tabs)/customers")}
                   >
                     <View style={styles.menuIconContainer}>
                       <UsersIcon size={22} color="#333333" />
@@ -256,7 +256,7 @@ export default function DrawerScreen() {
 
                   <TouchableOpacity
                     style={styles.menuItem}
-                    onPress={() => handleNavigation("/(app)/inventory")}
+                    onPress={() => handleNavigation("/(app)/(tabs)/inventory")}
                   >
                     <View style={styles.menuIconContainer}>
                       <Package size={22} color="#333333" />
@@ -398,16 +398,6 @@ export default function DrawerScreen() {
                   </TouchableOpacity>
                 </>
               )}
-              {/* Logout Button - Shown for all users */}
-              <TouchableOpacity
-                style={[styles.menuItem, styles.logoutItem]}
-                onPress={handleLogout}
-              >
-                <View style={styles.menuIconContainer}>
-                  <LogOut size={22} color="#E53935" />
-                </View>
-                <Text style={[styles.menuText, styles.logoutText]}>Logout</Text>
-              </TouchableOpacity>
             </ScrollView>
 
             {/* Logout Button - Added at the bottom for all user types */}
@@ -430,12 +420,6 @@ export default function DrawerScreen() {
 }
 
 const styles = StyleSheet.create({
-  logoutItem: {
-    marginTop: 20,
-    borderTopWidth: 1,
-    borderTopColor: "#f0f0f0",
-    paddingTop: 20,
-  },
   logoutText: {
     color: "#E53935",
   },

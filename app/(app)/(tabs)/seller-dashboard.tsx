@@ -12,7 +12,9 @@ import {
   Share,
   Modal,
   Image,
-  Linking
+  Linking,
+  RefreshControl,
+  ActivityIndicator
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
@@ -22,7 +24,6 @@ import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import {
   BarChart2,
-  Package,
   Settings,
   User,
   ChevronRight,
@@ -52,20 +53,28 @@ import {
   Info,
   ArrowUpCircle,
   IndianRupee,
-  ThumbsUpIcon,
-  ThumbsDownIcon
+  ThumbsUp,
+  ThumbsDown,
+  Edit,
+  Camera,
+  Upload,
+  Image as ImageIcon
 } from "lucide-react-native";
 import { NotificationBell } from "@/components/NotificationBell";
 import * as Clipboard from 'expo-clipboard';
 import { images } from "@/constants/images";
 import { FontAwesome } from "@expo/vector-icons";
+import { useAuth } from "@/context/auth-context";
+import * as ImagePicker from 'expo-image-picker';
 
 const { width } = Dimensions.get("window");
 const CARD_WIDTH = (width - 40); // Adjust this value as needed for your layout
 
 export default function SellerDashboardScreen() {
+  const { user, firebaseAuth } = useAuth();
+  const currentUser = firebaseAuth.user || user;
+  
   const {
-    user,
     getNotificationsForUser,
     markNotificationAsRead,
     getBuyRequestsForSeller,
@@ -74,49 +83,110 @@ export default function SellerDashboardScreen() {
     acceptBuyRequest,
     declineBuyRequest,
     generateSellerReferralCode,
-    logout, notifications, unreadNotificationsCount, markAllNotificationsAsRead, users, getSellerCount, getCustomerCount, selectedSeller, setSelectedSeller
+    logout, 
+    notifications, 
+    unreadNotificationsCount, 
+    markAllNotificationsAsRead, 
+    users, 
+    getSellerCount, 
+    getCustomerCount, 
+    selectedSeller, 
+    setSelectedSeller,
+    updateUser
   } = useAuthStore();
 
-  const isAdmin = user?.role === 'admin';
-  const isCustomer = user?.role === 'customer';
-  const isSeller = user?.role === 'seller';
-
   const router = useRouter();
+  const [refreshing, setRefreshing] = useState(false);
   const [showAllNotifications, setShowAllNotifications] = useState(false);
   const [buyRequests, setBuyRequests] = useState<BuyRequest[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [referralCode, setReferralCode] = useState<string | undefined>(user?.referralCode);
+  const [referralCode, setReferralCode] = useState<string | undefined>(currentUser?.referralCode);
   const [isGeneratingCode, setIsGeneratingCode] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
+  const [inventory, setInventory] = useState<any[]>([]);
+  const [customerCount, setCustomerCount] = useState(0);
+  const [showImagePickerModal, setShowImagePickerModal] = useState(false);
+  const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
+  const [brandName, setBrandName] = useState(currentUser?.brandName || '');
+  const [brandImage, setBrandImage] = useState(currentUser?.brandImage || '');
 
   // States for async data fetching
   const [requestDetails, setRequestDetails] = useState<{ [key: string]: { product: any, customer: any } }>({});
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   // Get notifications for the current seller
-  const sellerNotifications = user ? getNotificationsForUser(user.id).filter(n =>
+  const sellerNotifications = currentUser ? getNotificationsForUser(currentUser.id).filter(n =>
     n.type === 'contact_request' ||
     n.type === 'rate_interest' ||
     n.type === 'buy_request' ||
     n.type === 'referral'
   ) : [];
 
-  // Fetch buy requests for the current seller
+  // Fetch data on mount
   useEffect(() => {
-    if (user) {
-      const requests = getBuyRequestsForSeller(user.id);
-      // Sort by newest first
+    if (currentUser) {
+      loadDashboardData();
+    } else {
+      // Redirect to login if no user
+      router.replace("/auth/login");
+    }
+  }, [currentUser]);
+
+  // Load all dashboard data
+  const loadDashboardData = async () => {
+    setRefreshing(true);
+    try {
+      // Load buy requests
+      const requests = getBuyRequestsForSeller(currentUser?.id || "");
       const sortedRequests = [...requests].sort((a, b) => b.createdAt - a.createdAt);
       setBuyRequests(sortedRequests);
-    }
-  }, [user]);
 
-  // Reset selected seller for new users
-  useEffect(() => {
-    if (!selectedSeller && user?.role === 'customer') {
-      setSelectedSeller(null);
+      // Load inventory
+      const items = getInventoryItemsForSeller(currentUser?.id || "");
+      setInventory(items);
+
+      // Load customer count
+      const contactedDetails = getContactedSellerDetails().filter(
+        contact => contact.sellerId === currentUser?.id
+      );
+      
+      // Get notifications for buy requests and rate interests
+      const customerNotifications = getNotificationsForUser(currentUser?.id || "").filter(
+        n => n.type === 'buy_request' || n.type === 'rate_interest' || n.type === 'contact_request'
+      );
+      
+      // Combine data to get unique customers
+      const uniqueCustomerIds = new Set();
+      
+      // Add customers from contacted details
+      for (const contact of contactedDetails) {
+        uniqueCustomerIds.add(contact.customerId);
+      }
+      
+      // Add customers from notifications
+      for (const notification of customerNotifications) {
+        const customerId = notification.data?.customer?.id || 
+                          notification.data?.user?.id ||
+                          notification.senderId;
+        
+        if (customerId) {
+          uniqueCustomerIds.add(customerId);
+        }
+      }
+      
+      setCustomerCount(uniqueCustomerIds.size);
+    } catch (error) {
+      console.error("Error loading dashboard data:", error);
+    } finally {
+      setRefreshing(false);
     }
-  }, [user]);
+  };
+
+  // Handle refresh
+  const onRefresh = () => {
+    loadDashboardData();
+  };
 
   // Format timestamp to readable date/time
   const formatTimestamp = (timestamp: number) => {
@@ -239,7 +309,7 @@ export default function SellerDashboardScreen() {
 
     try {
       // Get inventory item
-      const inventory = getInventoryItemsForSeller(user?.id || "");
+      const inventory = getInventoryItemsForSeller(currentUser?.id || "");
       const product = inventory.find(item => item.id === request.itemId);
 
       // Get customer details - properly handling the Promise
@@ -266,8 +336,9 @@ export default function SellerDashboardScreen() {
       return { product: null, customer: null };
     }
   };
+
+  // Pre-fetch details for all requests
   useEffect(() => {
-    // Pre-fetch details for all requests
     if (buyRequests.length > 0) {
       buyRequests.forEach(request => {
         getRequestDetails(request);
@@ -275,15 +346,14 @@ export default function SellerDashboardScreen() {
     }
   }, [buyRequests]);
 
-
   // Handle generate referral code
   const handleGenerateReferralCode = async () => {
-    if (!user) return;
+    if (!currentUser) return;
 
     setIsGeneratingCode(true);
 
     try {
-      const result = await generateSellerReferralCode(user.id);
+      const result = await generateSellerReferralCode(currentUser.id);
 
       if (result.success && result.code) {
         setReferralCode(result.code);
@@ -326,10 +396,10 @@ export default function SellerDashboardScreen() {
 
   // Handle share referral code
   const handleShareReferralCode = async () => {
-    if (!referralCode || !user) return;
+    if (!referralCode || !currentUser) return;
 
     try {
-      const brandName = user.brandName || user.fullName || user.name;
+      const brandName = currentUser.brandName || currentUser.fullName || currentUser.name;
       const message = `Add ${brandName} as your seller in Bhav app using my referral code: ${referralCode}`;
 
       await Share.share({
@@ -347,8 +417,6 @@ export default function SellerDashboardScreen() {
     }
   };
 
-
-  // admin
   // Get notification icon based on type
   const getNotificationIcon = (type: string) => {
     switch (type) {
@@ -375,16 +443,23 @@ export default function SellerDashboardScreen() {
     }
   };
 
-  const [showNotifications, setShowNotifications] = useState(false);
-  const adminNotifications = notifications;
-
-  const sellerCount = getSellerCount();
-  const customerCount = getCustomerCount();
-
-  const openDrawer = () => {
-    router.push("/drawer");
+  // Toggle notifications
+  const toggleNotifications = () => {
+    if (Platform.OS !== "web") {
+      Haptics.selectionAsync();
+    }
+    setShowNotifications(!showNotifications);
   };
 
+  // Mark all notifications as read
+  const handleMarkAllAsRead = () => {
+    if (Platform.OS !== "web") {
+      Haptics.selectionAsync();
+    }
+    markAllNotificationsAsRead();
+  };
+
+  // Handle logout
   const handleLogout = () => {
     Alert.alert(
       "Logout",
@@ -406,1179 +481,723 @@ export default function SellerDashboardScreen() {
     );
   };
 
-  const toggleNotifications = () => {
-    if (Platform.OS !== "web") {
-      Haptics.selectionAsync();
-    }
-    setShowNotifications(!showNotifications);
+  // Open drawer
+  const openDrawer = () => {
+    router.push("/drawer");
   };
 
-  const handleMarkAllAsRead = () => {
-    if (Platform.OS !== "web") {
-      Haptics.selectionAsync();
+  // Handle image picker
+  const handleImagePick = async (type: 'camera' | 'gallery') => {
+    try {
+      let result;
+      
+      if (type === 'camera') {
+        // Request camera permissions
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission Denied', 'Camera permission is required to take photos.');
+          return;
+        }
+        
+        result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.7,
+        });
+      } else {
+        // Request media library permissions
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission Denied', 'Media library permission is required to select photos.');
+          return;
+        }
+        
+        result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.7,
+        });
+      }
+      
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        // For now, just use the URI directly
+        // In a real app, you would upload this to a server and get a URL back
+        setBrandImage(result.assets[0].uri);
+        setShowImagePickerModal(false);
+        
+        // Update user profile with new brand image
+        handleUpdateProfile();
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      Alert.alert('Error', 'Failed to pick image. Please try again.');
     }
-    markAllNotificationsAsRead();
   };
 
-
-  const handleSellerClick = () => {
-    if (selectedSeller) {
-      router.push(`/seller-profile/${selectedSeller.id}`);
+  // Handle update profile
+  const handleUpdateProfile = async () => {
+    if (!currentUser) return;
+    
+    setIsUpdatingProfile(true);
+    
+    try {
+      // In a real app, you would upload the image to a server here
+      // and get a URL back to store in the user profile
+      
+      const updatedUser = {
+        ...currentUser,
+        brandName: brandName || currentUser.brandName,
+        brandImage: brandImage || currentUser.brandImage,
+        updatedAt: new Date().getTime()
+      };
+      
+      const result = await updateUser(updatedUser);
+      
+      if (result.success) {
+        Alert.alert('Success', 'Profile updated successfully.');
+      } else {
+        Alert.alert('Error', result.error || 'Failed to update profile.');
+      }
+    } catch (error) {
+      console.error('Error updating profile:', error);
+      Alert.alert('Error', 'An unexpected error occurred. Please try again.');
+    } finally {
+      setIsUpdatingProfile(false);
     }
   };
 
-
-  // handle contact
-  const handlePhoneClick = () => {
-    if (selectedSeller?.phone) {
-      Linking.openURL(`tel:${selectedSeller.phone}`);
-    } else {
-      Alert.alert("Phone Number Not Available", "The seller has not provided a phone number.");
-    }
+  // Get contacted seller details
+  const getContactedSellerDetails = () => {
+    // This is a placeholder - in your actual app, implement this function
+    // to return the contacted seller details from your auth store
+    return [];
   };
-
-  const handleLocationClick = () => {
-    if (selectedSeller?.location) {
-      Linking.openURL(`${selectedSeller.location}`);
-    } else {
-      Alert.alert("Location Not Available", "The seller has not provided a location.");
-    }
-  };
-
-  const handleWhatsAppClick = () => {
-    if (selectedSeller?.whatsappNumber) {
-      Linking.openURL(`https://wa.me/${selectedSeller.whatsappNumber}`);
-    } else {
-      Alert.alert("WhatsApp Not Available", "The seller has not provided a WhatsApp number.");
-    }
-  };
-
-  const handleInstagramClick = () => {
-    if (selectedSeller?.instagramHandle) {
-      Linking.openURL(`${selectedSeller.instagramHandle}`);
-    } else {
-      Alert.alert("Instagram Not Available", "The seller has not provided an Instagram profile.");
-    }
-  };
-
-  // Render buy request with cached details instead of calling getRequestDetails directly
-  const renderBuyRequest = (request: BuyRequest) => {
-    const details = requestDetails[request.id];
-    if (!details || !details.product || !details.customer) {
-      return (
-        <View key={request.id} style={styles.buyRequestCard}>
-          <View style={styles.buyRequestHeader}>
-            <Text>Loading request details...</Text>
-          </View>
-        </View>
-      );
-    }
-
-    const { product, customer } = details;
-
-    return (
-      <View key={request.id} style={styles.buyRequestCard}>
-        <View style={styles.buyRequestHeader}>
-          <View style={styles.buyRequestIconContainer}>
-            <ShoppingBag size={20} color="#F3B26B" />
-          </View>
-          <View style={styles.buyRequestTitleContainer}>
-            <Text style={styles.buyRequestTitle}>Buy Request: {product.productName}</Text>
-            <Text style={styles.buyRequestTime}>{formatTimestamp(request.createdAt)}</Text>
-          </View>
-        </View>
-
-        <View style={styles.buyRequestDetailsContainer}>
-          <View style={styles.buyRequestDetailRow}>
-            <Package size={16} color="#666666" style={styles.buyRequestDetailIcon} />
-            <Text style={styles.buyRequestDetailLabel}>Product:</Text>
-            <Text style={styles.buyRequestDetailValue}>{product.productName}</Text>
-          </View>
-
-          {product.sellPremium && (
-            <View style={styles.buyRequestDetailRow}>
-              <IndianRupee size={16} color="#666666" style={styles.buyRequestDetailIcon} />
-              <Text style={styles.buyRequestDetailLabel}>Sell Premium:</Text>
-              <Text style={styles.buyRequestDetailValue}>₹{product.sellPremium}</Text>
-            </View>
-          )}
-        </View>
-
-        <View style={styles.customerDetailsContainer}>
-          <Text style={styles.customerDetailsTitle}>Customer Details:</Text>
-
-          <View style={styles.customerDetailRow}>
-            <User size={16} color="#666666" style={styles.customerDetailIcon} />
-            <Text style={styles.customerDetailText}>{customer.fullName || customer.name}</Text>
-          </View>
-
-          <View style={styles.customerDetailRow}>
-            <Mail size={16} color="#666666" style={styles.customerDetailIcon} />
-            <Text style={styles.customerDetailText}>{customer.email}</Text>
-          </View>
-
-          {customer.phone && (
-            <View style={styles.customerDetailRow}>
-              <Phone size={16} color="#666666" style={styles.customerDetailIcon} />
-              <Text style={styles.customerDetailText}>{customer.phone}</Text>
-            </View>
-          )}
-
-          {customer.city && (
-            <View style={styles.customerDetailRow}>
-              <MapPin size={16} color="#666666" style={styles.customerDetailIcon} />
-              <Text style={styles.customerDetailText}>
-                {customer.city}
-                {customer.state ? `, ${customer.state}` : ""}
-              </Text>
-            </View>
-          )}
-        </View>
-
-        <View style={styles.buyRequestActions}>
-          <TouchableOpacity
-            style={[styles.buyRequestActionButton, styles.acceptButton]}
-            onPress={() => handleAcceptBuyRequest(request.id)}
-            disabled={isProcessing}
-          >
-            <Check size={16} color="#ffffff" />
-            <Text style={styles.buyRequestActionText}>Accept</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.buyRequestActionButton, styles.declineButton]}
-            onPress={() => handleDeclineBuyRequest(request.id)}
-            disabled={isProcessing}
-          >
-            <X size={16} color="#ffffff" />
-            <Text style={styles.buyRequestActionText}>Decline</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  };
-
 
   return (
-    <>
-      {isAdmin && (
-        <SafeAreaView style={styles.safeArea} edges={["top"]}>
-          <StatusBar style="dark" />
-          <View style={styles.header}>
-            <TouchableOpacity
-              onPress={openDrawer}
-              style={styles.menuButton}
-            >
-              <Menu size={24} color="#333333" />
-            </TouchableOpacity>
-            <View style={styles.headerTitleContainer}>
-              <Text style={styles.headerTitle}>Admin Dashboard</Text>
-            </View>
-            <NotificationBell />
-          </View>
-
-          <ScrollView
-            style={styles.scrollView}
-            showsVerticalScrollIndicator={false}
-          >
-            <View style={styles.welcomeContainer}>
-              <Text style={styles.welcomeText}>Welcome Admin,</Text>
-              <Text style={styles.adminName}>{user?.fullName || user?.name}</Text>
-            </View>
-
-            {/* Stats Cards */}
-            <View style={styles.statsContainer}>
-              <LinearGradient
-                colors={["#1976D2", "#64B5F6"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.singleStatCard}
-              >
-                <View style={styles.statIconContainerAdmin}>
-                  <UsersIcon size={24} color="#ffffff" />
-                </View>
-                <Text style={styles.statValueAdmin}>{users.length}</Text>
-                <Text style={styles.statLabelAdmin}>Total Users</Text>
-                <View style={styles.statTrend}>
-                  <ArrowUpRight size={16} color="#ffffff" />
-                  <Text style={styles.statTrendText}>+12%</Text>
-                </View>
-              </LinearGradient>
-            </View>
-
-            {/* Seller and Customer Stats */}
-            <View style={styles.statsContainer}>
-              <LinearGradient
-                colors={["#F3B62B", "#F5D76E"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.singleStatCard}
-              >
-                <View style={styles.statIconContainerAdmin}>
-                  <ShoppingBag size={24} color="#ffffff" />
-                </View>
-                <Text style={styles.statValueAdmin}>{sellerCount}</Text>
-                <Text style={styles.statLabelAdmin}>Total Sellers</Text>
-                <View style={styles.statTrend}>
-                  <ArrowUpRight size={16} color="#ffffff" />
-                  <Text style={styles.statTrendText}>+8%</Text>
-                </View>
-              </LinearGradient>
-            </View>
-
-            <View style={styles.statsContainer}>
-              <LinearGradient
-                colors={["#002810", "#43A047"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.singleStatCard}
-              >
-                <View style={styles.statIconContainerAdmin}>
-                  <User size={24} color="#ffffff" />
-                </View>
-                <Text style={styles.statValueAdmin}>{customerCount}</Text>
-                <Text style={styles.statLabelAdmin}>Total Customers</Text>
-                <View style={styles.statTrend}>
-                  <ArrowUpRight size={16} color="#ffffff" />
-                  <Text style={styles.statTrendText}>+15%</Text>
-                </View>
-              </LinearGradient>
-            </View>
-
-            <View style={styles.sectionContainer}>
-              <Text style={styles.sectionTitleAdmin}>Quick Actions</Text>
-              <View style={styles.quickActionsContainer}>
-                <TouchableOpacity
-                  style={styles.quickActionButton}
-                  onPress={() => router.push("/(admin)/users")}
-                >
-                  <View style={[styles.quickActionIcon, { backgroundColor: "#E3F2FD" }]}>
-                    <UsersIcon size={24} color="#1976D2" />
-                  </View>
-                  <Text style={styles.quickActionText}>Manage Users</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.quickActionButton}
-                  onPress={() => router.push("/(admin)/analytics")}
-                >
-                  <View style={[styles.quickActionIcon, { backgroundColor: "#FFF8E1" }]}>
-                    <BarChart2 size={24} color="#F3B62B" />
-                  </View>
-                  <Text style={styles.quickActionText}>View Analytics</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.quickActionButton}
-                  onPress={() => router.push("/(app)/live-rates")}
-                >
-                  <View style={[styles.quickActionIcon, { backgroundColor: "#E8F5E9" }]}>
-                    <TrendingUp size={24} color="#43A047" />
-                  </View>
-                  <Text style={styles.quickActionText}>Live Rates</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.quickActionButton}
-                  onPress={() => router.push("/(app)/share")}
-                >
-                  <View style={[styles.quickActionIcon, { backgroundColor: "#FFF3E0" }]}>
-                    <Gift size={24} color="#FF9800" />
-                  </View>
-                  <Text style={styles.quickActionText}>Referral Program</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <View style={styles.sectionContainer}>
-              <Text style={styles.sectionTitleAdmin}>Recent Activities</Text>
-              <View style={styles.activitiesContainer}>
-                {/* Recent Activities from Notifications */}
-                {adminNotifications.slice(0, 5).map((notification, index) => (
-                  <View style={styles.activityItem} key={notification.id || `activity-${index}`}>
-                    <View style={[styles.activityIcon, {
-                      backgroundColor: notification.type === 'user_signup' ? "#E3F2FD" :
-                        notification.type === 'transaction' ? "#FFF8E1" :
-                          notification.type === 'system' ? "#E8F5E9" :
-                            notification.type === 'alert' ? "#FFEBEE" :
-                              notification.type === 'contact_request' ? "#E8F5E9" :
-                                notification.type === 'role_change' ? "#E8F5E9" :
-                                  notification.type === 'payment_success' ? "#E8F5E9" :
-                                    notification.type === 'referral' ? "#FFF8E1" :
-                                      "#f5f5f5"
-                    }]}>
-                      {getNotificationIcon(notification.type)}
-                    </View>
-                    <View style={styles.activityContent}>
-                      <Text style={styles.activityTitle}>{notification.title}</Text>
-                      <Text style={styles.activityDescription}>{notification.message}</Text>
-                      <View style={styles.activityMeta}>
-                        <Clock size={14} color="#9e9e9e" />
-                        <Text style={styles.activityTime}>{formatTimestamp(notification.timestamp)}</Text>
-                      </View>
-                    </View>
-                  </View>
-                ))}
-
-                {adminNotifications.length === 0 && (
-                  <View style={styles.emptyActivities}>
-                    <Text style={styles.emptyActivitiesText}>No recent activities</Text>
-                  </View>
-                )}
-              </View>
-            </View>
-
-            {/* Logout Button */}
-            <View style={styles.logoutContainer}>
-              <TouchableOpacity
-                style={styles.logoutButton}
-                onPress={handleLogout}
-              >
-                <LogOut size={20} color="#ffffff" />
-                <Text style={styles.logoutText}>Logout</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-
-          {/* Notifications Modal */}
-          <Modal
-            visible={showNotifications}
-            transparent={true}
-            animationType="slide"
-            onRequestClose={() => setShowNotifications(false)}
-          >
-            <View style={styles.modalOverlay}>
-              <View style={styles.notificationContainer}>
-                <View style={styles.notificationHeader}>
-                  <Text style={styles.notificationHeaderTitle}>Notifications</Text>
-                  <TouchableOpacity
-                    onPress={() => setShowNotifications(false)}
-                    style={styles.closeButton}
-                  >
-                    <X size={24} color="#333333" />
-                  </TouchableOpacity>
-                </View>
-
-                {adminNotifications.length > 0 ? (
-                  <>
-                    <View style={styles.notificationActions}>
-                      <TouchableOpacity
-                        style={styles.markAllReadButton}
-                        onPress={handleMarkAllAsRead}
-                      >
-                        <Check size={16} color="#1976D2" />
-                        <Text style={styles.markAllReadText}>Mark all as read</Text>
-                      </TouchableOpacity>
-                    </View>
-
-                    <FlatList
-                      data={adminNotifications}
-                      keyExtractor={(item) => item.id}
-                      renderItem={({ item }) => (
-                        <TouchableOpacity
-                          style={[
-                            styles.notificationItem,
-                            !item.read && styles.notificationItemUnread
-                          ]}
-                          onPress={() => handleNotificationPress(item.id)}
-                        >
-                          {item.type === 'contact_request' ? (
-                            <View style={styles.contactRequestNotification}>
-                              <View style={styles.contactRequestHeader}>
-                                <User size={24} color="#1976D2" style={styles.contactRequestIcon} />
-                                <View style={styles.contactRequestTitleContainer}>
-                                  <Text style={styles.contactRequestTitle}>{item.title}</Text>
-                                  <Text style={styles.contactRequestTime}>{formatTimestamp(item.timestamp)}</Text>
-                                </View>
-                                {!item.read && <View style={styles.unreadIndicator} />}
-                              </View>
-
-                              <Text style={styles.contactRequestMessage}>{item.message}</Text>
-
-                              {item.data?.customer && item.data?.dealer && (
-                                <View style={styles.contactDetailsContainer}>
-                                  <View style={styles.contactDetailSection}>
-                                    <Text style={styles.contactDetailSectionTitle}>Customer:</Text>
-                                    <View style={styles.contactDetailRow}>
-                                      <User size={16} color="#666666" style={styles.contactDetailIcon} />
-                                      <Text style={styles.contactDetailText}>{item.data.customer.name}</Text>
-                                    </View>
-                                    <View style={styles.contactDetailRow}>
-                                      <Mail size={16} color="#666666" style={styles.contactDetailIcon} />
-                                      <Text style={styles.contactDetailText}>{item.data.customer.email}</Text>
-                                    </View>
-                                    {item.data.customer.phone && (
-                                      <View style={styles.contactDetailRow}>
-                                        <Phone size={16} color="#666666" style={styles.contactDetailIcon} />
-                                        <Text style={styles.contactDetailText}>{item.data.customer.phone}</Text>
-                                      </View>
-                                    )}
-                                  </View>
-
-                                  <View style={styles.contactDetailDivider} />
-
-                                  <View style={styles.contactDetailSection}>
-                                    <Text style={styles.contactDetailSectionTitle}>Dealer:</Text>
-                                    <View style={styles.contactDetailRow}>
-                                      <User size={16} color="#666666" style={styles.contactDetailIcon} />
-                                      <Text style={styles.contactDetailText}>{item.data.dealer.name}</Text>
-                                    </View>
-                                    <View style={styles.contactDetailRow}>
-                                      <Mail size={16} color="#666666" style={styles.contactDetailIcon} />
-                                      <Text style={styles.contactDetailText}>{item.data.dealer.email}</Text>
-                                    </View>
-                                    {item.data.dealer.phone && (
-                                      <View style={styles.contactDetailRow}>
-                                        <Phone size={16} color="#666666" style={styles.contactDetailIcon} />
-                                        <Text style={styles.contactDetailText}>{item.data.dealer.phone}</Text>
-                                      </View>
-                                    )}
-                                    {item.data.dealer.brandName && (
-                                      <View style={styles.contactDetailRow}>
-                                        <Award size={16} color="#F3B62B" style={styles.contactDetailIcon} />
-                                        <Text style={styles.contactDetailText}>{item.data.dealer.brandName}</Text>
-                                      </View>
-                                    )}
-                                  </View>
-                                </View>
-                              )}
-                            </View>
-                          ) : item.type === 'role_change' ? (
-                            <View style={styles.roleChangeNotification}>
-                              <View style={styles.notificationIconContainer}>
-                                <UserCheck size={20} color="#5C6BC0" />
-                              </View>
-                              <View style={styles.notificationContent}>
-                                <Text style={styles.notificationTitle}>{item.title}</Text>
-                                <Text style={styles.notificationMessage}>{item.message}</Text>
-
-                                {item.data?.user && (
-                                  <View style={styles.userDetailsContainer}>
-                                    <View style={styles.userDetailRow}>
-                                      <User size={14} color="#666666" style={styles.userDetailIcon} />
-                                      <Text style={styles.userDetailText}>{item.data.user.name}</Text>
-                                    </View>
-                                    <View style={styles.userDetailRow}>
-                                      <Mail size={14} color="#666666" style={styles.userDetailIcon} />
-                                      <Text style={styles.userDetailText}>{item.data.user.email}</Text>
-                                    </View>
-                                    {item.data.user.phone && (
-                                      <View style={styles.userDetailRow}>
-                                        <Phone size={14} color="#666666" style={styles.userDetailIcon} />
-                                        <Text style={styles.userDetailText}>{item.data.user.phone}</Text>
-                                      </View>
-                                    )}
-                                    {item.data.user.city && (
-                                      <View style={styles.userDetailRow}>
-                                        <MapPin size={14} color="#666666" style={styles.userDetailIcon} />
-                                        <Text style={styles.userDetailText}>
-                                          {item.data.user.city}
-                                          {item.data.user.state ? `, ${item.data.user.state}` : ""}
-                                        </Text>
-                                      </View>
-                                    )}
-                                    {item.data.user.brandName && (
-                                      <View style={styles.userDetailRow}>
-                                        <ShoppingBag size={14} color="#F3B62B" style={styles.userDetailIcon} />
-                                        <Text style={styles.userDetailText}>{item.data.user.brandName}</Text>
-                                      </View>
-                                    )}
-                                  </View>
-                                )}
-
-                                <Text style={styles.notificationTime}>
-                                  {formatTimestamp(item.timestamp)}
-                                </Text>
-                              </View>
-                              {!item.read && <View style={styles.unreadIndicator} />}
-                            </View>
-                          ) : item.type === 'payment_success' ? (
-                            <View style={styles.paymentSuccessNotification}>
-                              <View style={styles.notificationIconContainer}>
-                                <CheckCircle size={20} color="#43A047" />
-                              </View>
-                              <View style={styles.notificationContent}>
-                                <Text style={styles.notificationTitle}>{item.title}</Text>
-                                <Text style={styles.notificationMessage}>{item.message}</Text>
-
-                                {item.data?.user && (
-                                  <View style={styles.userDetailsContainer}>
-                                    <View style={styles.userDetailRow}>
-                                      <User size={14} color="#666666" style={styles.userDetailIcon} />
-                                      <Text style={styles.userDetailText}>{item.data.user.name}</Text>
-                                    </View>
-                                    <View style={styles.userDetailRow}>
-                                      <Mail size={14} color="#666666" style={styles.userDetailIcon} />
-                                      <Text style={styles.userDetailText}>{item.data.user.email}</Text>
-                                    </View>
-                                    {item.data.user.phone && (
-                                      <View style={styles.userDetailRow}>
-                                        <Phone size={14} color="#666666" style={styles.userDetailIcon} />
-                                        <Text style={styles.userDetailText}>{item.data.user.phone}</Text>
-                                      </View>
-                                    )}
-                                    {item.data.plan && (
-                                      <View style={styles.userDetailRow}>
-                                        <IndianRupee size={14} color="#F3B62B" style={styles.userDetailIcon} />
-                                        <Text style={styles.userDetailText}>
-                                          {item.data.plan.title} Plan - {item.data.plan.price}
-                                        </Text>
-                                      </View>
-                                    )}
-                                  </View>
-                                )}
-
-                                <Text style={styles.notificationTime}>
-                                  {formatTimestamp(item.timestamp)}
-                                </Text>
-                              </View>
-                              {!item.read && <View style={styles.unreadIndicator} />}
-                            </View>
-                          ) : (
-                            <>
-                              <View style={styles.notificationIconContainer}>
-                                {getNotificationIcon(item.type)}
-                              </View>
-                              <View style={styles.notificationContent}>
-                                <Text style={styles.notificationTitle}>{item.title}</Text>
-                                <Text style={styles.notificationMessage}>{item.message}</Text>
-
-                                {/* Show user details for user_signup notifications */}
-                                {item.type === 'user_signup' && item.data?.user && (
-                                  <View style={styles.userDetailsContainer}>
-                                    <View style={styles.userDetailRow}>
-                                      <Mail size={14} color="#666666" style={styles.userDetailIcon} />
-                                      <Text style={styles.userDetailText}>{item.data.user.email}</Text>
-                                    </View>
-                                    {item.data.user.phone && (
-                                      <View style={styles.userDetailRow}>
-                                        <Phone size={14} color="#666666" style={styles.userDetailIcon} />
-                                        <Text style={styles.userDetailText}>{item.data.user.phone}</Text>
-                                      </View>
-                                    )}
-                                    {item.data.user.city && item.data.user.state && (
-                                      <View style={styles.userDetailRow}>
-                                        <MapPin size={14} color="#666666" style={styles.userDetailIcon} />
-                                        <Text style={styles.userDetailText}>{item.data.user.city}, {item.data.user.state}</Text>
-                                      </View>
-                                    )}
-                                    {item.data.user.role && (
-                                      <View style={styles.userDetailRow}>
-                                        <UserCheck size={14} color="#5C6BC0" style={styles.userDetailIcon} />
-                                        <Text style={styles.userDetailText}>
-                                          Role: {item.data.user.role.charAt(0).toUpperCase() + item.data.user.role.slice(1)}
-                                        </Text>
-                                      </View>
-                                    )}
-                                  </View>
-                                )}
-
-                                {/* Show referral details for referral notifications */}
-                                {item.type === 'referral' && item.data && (
-                                  <View style={styles.referralDetailsContainer}>
-                                    <View style={styles.referralDetailRow}>
-                                      <User size={14} color="#666666" style={styles.referralDetailIcon} />
-                                      <Text style={styles.referralDetailText}>
-                                        {item.data.user.name} ({item.data.user.email})
-                                      </Text>
-                                    </View>
-                                    <View style={styles.referralDetailRow}>
-                                      <Gift size={14} color="#F3B62B" style={styles.referralDetailIcon} />
-                                      <Text style={styles.referralDetailText}>
-                                        Code: <Text style={styles.referralCode}>{item.data.referralCode}</Text>
-                                      </Text>
-                                    </View>
-                                    <View style={styles.referralDetailRow}>
-                                      <Award size={14} color="#F3B62B" style={styles.referralDetailIcon} />
-                                      <Text style={styles.referralDetailText}>
-                                        Premium access granted
-                                      </Text>
-                                    </View>
-                                  </View>
-                                )}
-
-                                <Text style={styles.notificationTime}>
-                                  {formatTimestamp(item.timestamp)}
-                                </Text>
-                              </View>
-                              {!item.read && <View style={styles.unreadIndicator} />}
-                            </>
-                          )}
-                        </TouchableOpacity>
-                      )}
-                      showsVerticalScrollIndicator={false}
-                      contentContainerStyle={styles.notificationsList}
-                    />
-                  </>
-                ) : (
-                  <View style={styles.emptyNotifications}>
-                    <Bell size={48} color="#e0e0e0" />
-                    <Text style={styles.emptyNotificationsText}>No notifications yet</Text>
-                  </View>
-                )}
-              </View>
-            </View>
-          </Modal>
-        </SafeAreaView>
-      )}
-
-
-
-
-
-
-
-      {/* Seller Dashboard */}
-      {isSeller && (
-        <SafeAreaView style={styles.safeArea} edges={["top"]}>
-          <StatusBar style="dark" />
-
-          <View style={styles.header}>
-            <TouchableOpacity
-              onPress={openDrawer}
-              style={styles.menuButton}
-            >
-              <Menu size={24} color="#333333" />
-            </TouchableOpacity>
-            <View style={styles.headerTitleContainer}>
-              <Text style={styles.headerTitle}>Seller Dashboard</Text>
-            </View>
-            <NotificationBell />
-          </View>
-
-          <ScrollView
-            style={styles.scrollView}
-            showsVerticalScrollIndicator={false}
-          >
-            <View style={styles.welcomeContainer}>
-              <Text style={styles.welcomeText}>Welcome,</Text>
-              <Text style={styles.sellerName}>{user?.fullName || user?.name}</Text>
-            </View>
-
-            {/* Referral Code Section */}
-            <View style={styles.referralCodeContainer}>
-              <View style={styles.referralCodeHeader}>
-                <Text style={styles.referralCodeTitle}>Your Referral Code</Text>
-                <TouchableOpacity
-                  style={styles.shareButton}
-                  onPress={handleShareReferralCode}
-                  disabled={!referralCode || isGeneratingCode}
-                >
-                  <Share2 size={18} color="#1976D2" />
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.referralCodeContent}>
-                {referralCode ? (
-                  <>
-                    <Text style={styles.referralCode}>{referralCode}</Text>
-                    <TouchableOpacity
-                      style={styles.copyButton}
-                      onPress={handleCopyReferralCode}
-                    >
-                      {codeCopied ? (
-                        <Check size={20} color="#4CAF50" />
-                      ) : (
-                        <Copy size={20} color="#1976D2" />
-                      )}
-                    </TouchableOpacity>
-                  </>
-                ) : (
-                  <TouchableOpacity
-                    style={styles.generateButton}
-                    onPress={handleGenerateReferralCode}
-                    disabled={isGeneratingCode}
-                  >
-                    {isGeneratingCode ? (
-                      <Text style={styles.generateButtonText}>Generating...</Text>
-                    ) : (
-                      <Text style={styles.generateButtonText}>Generate Code</Text>
-                    )}
-                  </TouchableOpacity>
-                )}
-              </View>
-
-              <Text style={styles.referralCodeInfo}>
-                Share this code with your customers so they can add you as their seller.
+    <SafeAreaView style={styles.container} edges={["top"]}>
+      <StatusBar style="dark" />
+      
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={openDrawer} style={styles.menuButton}>
+          <Menu size={24} color="#333" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Seller Dashboard</Text>
+        <NotificationBell 
+          count={unreadNotificationsCount} 
+          onPress={toggleNotifications} 
+        />
+      </View>
+      
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollViewContent}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Welcome Section */}
+        <View style={styles.welcomeSection}>
+          <View style={styles.welcomeContent}>
+            <View>
+              <Text style={styles.welcomeText}>
+                Welcome, {currentUser?.name || currentUser?.fullName || 'Seller'}!
+              </Text>
+              <Text style={styles.roleText}>
+                Seller Dashboard
               </Text>
             </View>
-
-            {/* Quick Stats */}
-            <View style={styles.statsContainer}>
-              <View style={styles.statCard}>
-                <View style={[styles.statIconContainer, { backgroundColor: "#E3F2FD" }]}>
-                  <Package size={24} color="#1976D2" />
+            
+            <TouchableOpacity 
+              style={styles.profileButton}
+              onPress={() => router.push("/(app)/profile")}
+            >
+              {currentUser?.profileImage ? (
+                <Image 
+                  source={{ uri: currentUser.profileImage }} 
+                  style={styles.profileImage} 
+                />
+              ) : (
+                <View style={styles.profilePlaceholder}>
+                  <User size={24} color="#F3B62B" />
                 </View>
-                <Text style={styles.statValue}>{getInventoryItemsForSeller(user?.id || "").length}</Text>
-                <Text style={styles.statLabel}>Products</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+        
+        {/* Brand Banner */}
+        <View style={styles.brandBanner}>
+          <LinearGradient
+            colors={['#F3B62B', '#E09900']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.brandBannerGradient}
+          >
+            <View style={styles.brandBannerContent}>
+              <View>
+                <Text style={styles.brandBannerLabel}>Your Brand</Text>
+                <Text style={styles.brandBannerName}>
+                  {currentUser?.brandName || 'Set up your brand name'}
+                </Text>
               </View>
-
-              <View style={styles.statCard}>
-                <View style={[styles.statIconContainer, { backgroundColor: "#FFF8E1" }]}>
-                  <IndianRupee size={24} color="#F3B26B" />
-                </View>
-                <Text style={styles.statValue}>{buyRequests.filter(req => req.status === 'accepted').length}</Text>
-                <Text style={styles.statLabel}>Sales</Text>
-              </View>
-
-              <View style={styles.statCard}>
-                <View style={[styles.statIconContainer, { backgroundColor: "#E8F5E9" }]}>
-                  <BarChart2 size={24} color="#43A047" />
-                </View>
-                <Text style={styles.statValue}>{buyRequests.length}</Text>
-                <Text style={styles.statLabel}>Requests</Text>
-              </View>
+              <TouchableOpacity 
+                style={styles.brandBannerButton}
+                onPress={() => router.push("/(app)/profile")}
+              >
+                <Text style={styles.brandBannerButtonText}>Edit</Text>
+              </TouchableOpacity>
             </View>
-
-            {/* Buy Requests Section */}
-            {/* Buy Requests Section - updated to use cached details */}
-            {buyRequests.filter(req => req.status === 'pending').length > 0 && (
-              <View style={styles.buyRequestsContainer}>
-                <View style={styles.sectionTitleRow}>
-                  <Text style={styles.sectionTitle}>Buy Requests</Text>
-                  {buyRequests.filter(req => req.status === 'pending').length > 2 && (
-                    <TouchableOpacity
-                      onPress={() => setShowAllNotifications(!showAllNotifications)}
-                      style={styles.viewAllButton}
-                    >
-                      <Text style={styles.viewAllButtonText}>
-                        {showAllNotifications ? "Show Less" : "View All"}
+          </LinearGradient>
+        </View>
+        
+        {/* Brand Section */}
+        <View style={styles.brandSection}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Your Brand</Text>
+            <TouchableOpacity onPress={() => router.push("/(app)/profile")}>
+              <Text style={styles.seeAllText}>Edit Profile</Text>
+            </TouchableOpacity>
+          </View>
+          
+          <View style={styles.brandCard}>
+            <View style={styles.brandImageContainer}>
+              <TouchableOpacity 
+                style={styles.brandImageWrapper}
+                onPress={() => setShowImagePickerModal(true)}
+              >
+                {brandImage ? (
+                  <Image 
+                    source={{ uri: brandImage }} 
+                    style={styles.brandImage} 
+                  />
+                ) : (
+                  <View style={styles.brandImagePlaceholder}>
+                    <ShoppingBag size={40} color="#F3B62B" />
+                    <Text style={styles.addImageText}>Add Logo</Text>
+                  </View>
+                )}
+                <View style={styles.editIconContainer}>
+                  <Camera size={16} color="#fff" />
+                </View>
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.brandDetails}>
+              <Text style={styles.brandNameLabel}>Brand Name</Text>
+              <Text style={styles.brandName}>
+                {currentUser?.brandName || 'Set your brand name'}
+              </Text>
+              <TouchableOpacity 
+                style={styles.editBrandButton}
+                onPress={() => router.push("/(app)/profile")}
+              >
+                <Text style={styles.editBrandText}>Edit Brand Details</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+        
+        {/* Stats Section */}
+        <View style={styles.statsSection}>
+          <View style={styles.statsRow}>
+            <View style={styles.statCard}>
+              <View style={styles.statIconContainer}>
+                <ShoppingBag size={24} color="#F3B62B" />
+              </View>
+              <Text style={styles.statValue}>{inventory.length}</Text>
+              <Text style={styles.statLabel}>Inventory Items</Text>
+            </View>
+            
+            <View style={styles.statCard}>
+              <View style={styles.statIconContainer}>
+                <Users size={24} color="#F3B62B" />
+              </View>
+              <Text style={styles.statValue}>{customerCount}</Text>
+              <Text style={styles.statLabel}>Customers</Text>
+            </View>
+          </View>
+          
+          <View style={styles.statsRow}>
+            <View style={styles.statCard}>
+              <View style={styles.statIconContainer}>
+                <Bell size={24} color="#F3B62B" />
+              </View>
+              <Text style={styles.statValue}>{buyRequests.filter(req => req.status === 'pending').length}</Text>
+              <Text style={styles.statLabel}>Pending Requests</Text>
+            </View>
+            
+            <View style={styles.statCard}>
+              <View style={styles.statIconContainer}>
+                <CheckCircle size={24} color="#F3B62B" />
+              </View>
+              <Text style={styles.statValue}>{buyRequests.filter(req => req.status === 'accepted').length}</Text>
+              <Text style={styles.statLabel}>Accepted Requests</Text>
+            </View>
+          </View>
+        </View>
+        
+        {/* Quick Actions */}
+        <View style={styles.quickActionsSection}>
+          <Text style={styles.sectionTitle}>Quick Actions</Text>
+          
+          <View style={styles.quickActionsGrid}>
+            <TouchableOpacity 
+              style={styles.quickActionCard}
+              onPress={() => router.push("/(app)/(tabs)/inventory")}
+            >
+              <View style={styles.quickActionIconContainer}>
+                <ShoppingBag size={24} color="#F3B62B" />
+              </View>
+              <Text style={styles.quickActionText}>Manage Inventory</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.quickActionCard}
+              onPress={() => router.push("/(app)/(tabs)/customers")}
+            >
+              <View style={styles.quickActionIconContainer}>
+                <Users size={24} color="#F3B62B" />
+              </View>
+              <Text style={styles.quickActionText}>View Customers</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.quickActionCard}
+              onPress={() => router.push("/(app)/(tabs)/rates")}
+            >
+              <View style={styles.quickActionIconContainer}>
+                <TrendingUp size={24} color="#F3B62B" />
+              </View>
+              <Text style={styles.quickActionText}>Check Rates</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.quickActionCard}
+              onPress={() => router.push("/(app)/profile")}
+            >
+              <View style={styles.quickActionIconContainer}>
+                <User size={24} color="#F3B62B" />
+              </View>
+              <Text style={styles.quickActionText}>Edit Profile</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+        
+        {/* Recent Buy Requests */}
+        <View style={styles.buyRequestsSection}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Recent Buy Requests</Text>
+            {buyRequests.length > 0 && (
+              <TouchableOpacity onPress={() => router.push("/(app)/buy-requests")}>
+                <Text style={styles.seeAllText}>See All</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          
+          {buyRequests.length === 0 ? (
+            <View style={styles.emptyStateContainer}>
+              <ShoppingBag size={48} color="#ccc" />
+              <Text style={styles.emptyStateText}>No buy requests yet</Text>
+              <Text style={styles.emptyStateSubtext}>
+                When customers request to buy your products, they'll appear here.
+              </Text>
+            </View>
+          ) : (
+            // Limit to 2 requests to prevent scrolling issues
+            buyRequests.slice(0, 2).map((request) => {
+              const details = requestDetails[request.id] || { product: null, customer: null };
+              
+              return (
+                <View key={request.id} style={styles.buyRequestCard}>
+                  <View style={styles.buyRequestHeader}>
+                    <View style={styles.buyRequestUser}>
+                      {details.customer?.profileImage ? (
+                        <Image 
+                          source={{ uri: details.customer.profileImage }} 
+                          style={styles.customerAvatar} 
+                        />
+                      ) : (
+                        <View style={styles.customerAvatarPlaceholder}>
+                          <User size={16} color="#F3B62B" />
+                        </View>
+                      )}
+                      <Text style={styles.customerName} numberOfLines={1}>
+                        {details.customer?.name || details.customer?.fullName || 'Unknown Customer'}
                       </Text>
-                    </TouchableOpacity>
+                    </View>
+                    
+                    <View style={[
+                      styles.statusBadge,
+                      request.status === 'accepted' ? styles.acceptedBadge :
+                      request.status === 'declined' ? styles.declinedBadge :
+                      styles.pendingBadge
+                    ]}>
+                      <Text style={[
+                        styles.statusText,
+                        request.status === 'accepted' ? styles.acceptedText :
+                        request.status === 'declined' ? styles.declinedText :
+                        styles.pendingText
+                      ]}>
+                        {request.status === 'accepted' ? 'Accepted' :
+                         request.status === 'declined' ? 'Declined' :
+                         'Pending'}
+                      </Text>
+                    </View>
+                  </View>
+                  
+                  <View style={styles.buyRequestDetails}>
+                    <Text style={styles.productName} numberOfLines={1}>
+                      {details.product?.name || 'Unknown Product'}
+                    </Text>
+                    <Text style={styles.requestTime}>
+                      {formatTimestamp(request.createdAt)}
+                    </Text>
+                  </View>
+                  
+                  {request.status === 'pending' && (
+                    <View style={styles.buyRequestActions}>
+                      <TouchableOpacity 
+                        style={[styles.actionButton, styles.declineButton]}
+                        onPress={() => handleDeclineBuyRequest(request.id)}
+                        disabled={isProcessing}
+                      >
+                        {isProcessing ? (
+                          <ActivityIndicator size="small" color="#E53935" />
+                        ) : (
+                          <>
+                            <ThumbsDown size={16} color="#E53935" />
+                            <Text style={styles.declineButtonText}>Decline</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                      
+                      <TouchableOpacity 
+                        style={[styles.actionButton, styles.acceptButton]}
+                        onPress={() => handleAcceptBuyRequest(request.id)}
+                        disabled={isProcessing}
+                      >
+                        {isProcessing ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <>
+                            <ThumbsUp size={16} color="#fff" />
+                            <Text style={styles.acceptButtonText}>Accept</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    </View>
                   )}
                 </View>
-
-                {/* Use the renderBuyRequest function for each request */}
-                {(showAllNotifications
-                  ? buyRequests.filter(req => req.status === 'pending')
-                  : buyRequests.filter(req => req.status === 'pending').slice(0, 2)
-                ).map(request => renderBuyRequest(request))}
+              );
+            })
+          )}
+        </View>
+        
+        {/* Referral Section */}
+        <View style={styles.referralSection}>
+          <Text style={styles.sectionTitle}>Referral Program</Text>
+          
+          <View style={styles.referralCard}>
+            <View style={styles.referralHeader}>
+              <View style={styles.referralIconContainer}>
+                <Gift size={24} color="#F3B62B" />
               </View>
-            )}
-
-
-            {/* Information Card */}
-            <View style={styles.infoCardContainer}>
-              <LinearGradient
-                colors={["#E3F2FD", "#BBDEFB"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.infoCard}
-              >
-                <View style={styles.infoCardHeader}>
-                  <Bell size={24} color="#1976D2" />
-                  <Text style={styles.infoCardTitle}>Customer Inquiries</Text>
+              <Text style={styles.referralTitle}>Share Your Referral Code</Text>
+            </View>
+            
+            <Text style={styles.referralDescription}>
+              Invite customers to connect with you on Bhav app using your unique referral code.
+            </Text>
+            
+            {referralCode ? (
+              <View style={styles.referralCodeContainer}>
+                <Text style={styles.referralCode}>{referralCode}</Text>
+                <View style={styles.referralActions}>
+                  <TouchableOpacity 
+                    style={styles.referralAction}
+                    onPress={handleCopyReferralCode}
+                  >
+                    {codeCopied ? (
+                      <Check size={20} color="#43A047" />
+                    ) : (
+                      <Copy size={20} color="#666" />
+                    )}
+                    <Text style={styles.referralActionText}>
+                      {codeCopied ? 'Copied!' : 'Copy'}
+                    </Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity 
+                    style={styles.referralAction}
+                    onPress={handleShareReferralCode}
+                  >
+                    <Share2 size={20} color="#666" />
+                    <Text style={styles.referralActionText}>Share</Text>
+                  </TouchableOpacity>
                 </View>
-                <Text style={styles.infoCardContent}>
-                  When customers contact you or send buy requests, their details will appear in the sections above. You can reach out to them directly using their contact information or accept/decline their buy requests.
-                </Text>
-              </LinearGradient>
-            </View>
-          </ScrollView>
-        </SafeAreaView>
-      )}
-
-
-
-
-
-
-      {isCustomer && (
-        <SafeAreaView style={styles.safeArea} edges={["top"]}>
-          <StatusBar style="dark" />
-
-          <View style={styles.header}>
-            <TouchableOpacity
-              onPress={openDrawer}
-              style={styles.menuButton}
-            >
-              <Menu size={24} color="#333333" />
-            </TouchableOpacity>
-            <View style={styles.headerTitleContainer}>
-              <Text style={styles.headerTitle}>Customer Dashboard</Text>
-            </View>
-            <NotificationBell />
-          </View>
-
-          <ScrollView
-            style={styles.scrollView}
-            showsVerticalScrollIndicator={false}>
-
-
-            <View style={styles.welcomeContainer}>
-              <Text style={styles.welcomeText}>Welcome,</Text>
-              <Text style={styles.sellerName}>{user?.fullName || user?.name}</Text>
-            </View>
-
-            {/* Brand/logo section */}
-            {(isCustomer || isAdmin) ? (
-              <TouchableOpacity style={styles.headerCustomer} onPress={handleSellerClick}>
-
-                {selectedSeller?.brandImage ? (
-                  <Image source={{ uri: selectedSeller.brandImage }} style={styles.brandCoverImage} />
-                ) : selectedSeller?.brandName ? (
-                  <Text style={styles.brandName}>{selectedSeller.brandName}</Text>
+              </View>
+            ) : (
+              <TouchableOpacity 
+                style={styles.generateCodeButton}
+                onPress={handleGenerateReferralCode}
+                disabled={isGeneratingCode}
+              >
+                {isGeneratingCode ? (
+                  <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <Image source={images.bhavLogo} style={styles.logo} />
+                  <Text style={styles.generateCodeText}>Generate Referral Code</Text>
                 )}
               </TouchableOpacity>
-            ) : (
-              <Image source={images.bhavLogo} style={styles.logo} />
             )}
-
-
-            {selectedSeller ? (
-              <>
-                <View style={styles.sellerContainer}>
-                  <View style={styles.sellerHeader}>
-                    <Text style={styles.sellerInfo}>Store</Text>
-                    <Text style={styles.sellerDetails}>{selectedSeller.brandName}</Text>
-                  </View>
-
-                  <View style={styles.sellerHeader}>
-                    <Text style={styles.sellerInfo}>Owner</Text>
-                    <Text style={styles.sellerDetails}>{selectedSeller.name}</Text>
-                  </View>
-
-                  <View style={styles.sellerHeader}>
-                    <Text style={styles.sellerInfo}>About</Text>
-                    <Text style={styles.sellerDetails}>{selectedSeller.about || "No information available"}</Text>
-                  </View>
-
-                  <View style={styles.sellerHeader}>
-                    <Text style={styles.sellerInfo}>Catalogue</Text>
-                    {selectedSeller.catalogueImages && selectedSeller.catalogueImages.length > 0 ? (
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                        <View style={styles.catalogueContainer}>
-                          {selectedSeller.catalogueImages.map((image, index) => (
-                            <Image
-                              key={index}
-                              source={{ uri: image }}
-                              style={styles.catalogueImage}
-                            />
-                          ))}
-                        </View>
-                      </ScrollView>
-                    ) : (
-                      <Text style={styles.sellerDetails}>No catalogue images available</Text>
-                    )}
-                  </View>
-
-                  <View style={styles.sellerHeader}>
-                    <Text style={styles.sellerInfo}>Contact</Text>
-                    <View style={styles.sellerContactIcons}>
-                      <TouchableOpacity onPress={handlePhoneClick}>
-                        <FontAwesome
-                          name="phone"
-                          size={30}
-                          color="#fff"
-                          style={{
-                            borderWidth: 2,
-                            borderColor: "#1F7D53",
-                            backgroundColor: "#1F7D53",
-                            borderRadius: 100,
-                            paddingVertical: 2,
-                            paddingHorizontal: 5,
-                          }}
-                        />
-                      </TouchableOpacity>
-
-                      <TouchableOpacity onPress={handleLocationClick}>
-                        <FontAwesome
-                          name="map-marker"
-                          size={30}
-                          color="#fff"
-                          style={{
-                            borderWidth: 2,
-                            borderColor: "#1976D2",
-                            backgroundColor: "#1976D2",
-                            borderRadius: 100,
-                            paddingVertical: 2,
-                            paddingHorizontal: 8,
-                          }}
-                        />
-                      </TouchableOpacity>
-
-                      <TouchableOpacity onPress={handleWhatsAppClick}>
-                        <FontAwesome
-                          name="whatsapp"
-                          size={30}
-                          color="#fff"
-                          style={{
-                            borderWidth: 2,
-                            borderColor: "#25D366",
-                            backgroundColor: "#25D366",
-                            borderRadius: 100,
-                            paddingVertical: 2,
-                            paddingHorizontal: 4,
-                          }}
-                        />
-                      </TouchableOpacity>
-
-                      <TouchableOpacity onPress={handleInstagramClick}>
-                        <FontAwesome
-                          name="instagram"
-                          size={30}
-                          color="#fff"
-                          style={{
-                            borderWidth: 2,
-                            borderColor: "#E4405F",
-                            backgroundColor: "#E4405F",
-                            borderRadius: 100,
-                            paddingVertical: 2,
-                            paddingHorizontal: 4,
-                          }}
-                        />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                </View>
-              </>
-            ) : (
-              // informative content
-              <>
-                <View style={styles.infoCardContainerCustomer}>
-                  <LinearGradient
-                    colors={["#E3F2FD", "#BBDEFB"]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.infoCard}
-                  >
-                    <View style={styles.infoCardHeader}>
-                      <Info size={24} color="#1976D2" />
-                      <Text style={styles.infoCardTitle}>Customer Dashboard</Text>
-                    </View>
-                    <Text style={styles.infoCardContent}>
-                      At Bhav, as a customer you can view your seller's details, contact them directly, and manage your buy requests.
-                    </Text>
-                  </LinearGradient>
-                </View>
-              </>
-            )}
-
-
-
-
-            <View style={styles.customerContainer}>
-              <View style={{ width: "48%" }}>
-                <TouchableOpacity onPress={() => router.push("../seller-data")}>
-                  <LinearGradient
-                    colors={["#FFF8E1", "#FFF3CD"]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.cardGradient}
-                  >
-                    <Users size={50} color="#F3B62B" />
-                    <Text style={styles.customerText}>Connect to a Seller</Text>
-                  </LinearGradient>
-                </TouchableOpacity>
-              </View>
-
-              <View style={{ width: "48%" }}>
-                <TouchableOpacity onPress={() => router.push("/auth/subscription")}>
-                  <LinearGradient
-                    colors={["#FFF8E1", "#FFF3CD"]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.cardGradient}
-                  >
-                    <ArrowUpCircle size={50} color="#F3B62B" />
-                    <Text style={styles.customerText}>
-                      Upgrade to Seller
-                    </Text>
-                  </LinearGradient>
-                </TouchableOpacity>
-              </View>
+          </View>
+        </View>
+      </ScrollView>
+      
+      {/* Notifications Modal */}
+      <Modal
+        visible={showNotifications}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowNotifications(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.notificationsModal}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Notifications</Text>
+              <TouchableOpacity onPress={() => setShowNotifications(false)}>
+                <X size={24} color="#333" />
+              </TouchableOpacity>
             </View>
-
-            <View style={styles.infoCardContainer}>
-              <LinearGradient
-                colors={["#E3F2FD", "#BBDEFB"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.infoCard}
+            
+            {sellerNotifications.length === 0 ? (
+              <View style={styles.emptyNotifications}>
+                <Bell size={48} color="#ccc" />
+                <Text style={styles.emptyNotificationsText}>No notifications yet</Text>
+              </View>
+            ) : (
+              <>
+                <TouchableOpacity 
+                  style={styles.markAllReadButton}
+                  onPress={handleMarkAllAsRead}
+                >
+                  <Text style={styles.markAllReadText}>Mark all as read</Text>
+                </TouchableOpacity>
+                
+                <ScrollView style={styles.notificationsList}>
+                  {sellerNotifications.map((notification) => (
+                    <TouchableOpacity
+                      key={notification.id}
+                      style={[
+                        styles.notificationItem,
+                        !notification.read && styles.unreadNotification
+                      ]}
+                      onPress={() => handleNotificationPress(notification.id)}
+                    >
+                      <View style={styles.notificationIcon}>
+                        {getNotificationIcon(notification.type)}
+                      </View>
+                      <View style={styles.notificationContent}>
+                        <Text style={styles.notificationTitle}>
+                          {notification.title}
+                        </Text>
+                        <Text style={styles.notificationMessage}>
+                          {notification.message}
+                        </Text>
+                        <Text style={styles.notificationTime}>
+                          {formatTimestamp(notification.timestamp)}
+                        </Text>
+                      </View>
+                      {!notification.read && (
+                        <View style={styles.unreadDot} />
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+      
+      {/* Image Picker Modal */}
+      <Modal
+        visible={showImagePickerModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowImagePickerModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.imagePickerModal}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Update Brand Logo</Text>
+              <TouchableOpacity onPress={() => setShowImagePickerModal(false)}>
+                <X size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.imagePickerOptions}>
+              <TouchableOpacity 
+                style={styles.imagePickerOption}
+                onPress={() => handleImagePick('camera')}
               >
-                <View style={styles.infoCardHeader}>
-                  <Info size={24} color="#1976D2" />
-                  <Text style={styles.infoCardTitle}>Benfits for Seller</Text>
+                <View style={styles.imagePickerIconContainer}>
+                  <Camera size={32} color="#F3B62B" />
                 </View>
-                <Text style={styles.infoCardContent}>
-                  At Bhav, as a customer you can view your seller's details, contact them directly, and manage your buy requests.
-                </Text>
-              </LinearGradient>
+                <Text style={styles.imagePickerText}>Take Photo</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.imagePickerOption}
+                onPress={() => handleImagePick('gallery')}
+              >
+                <View style={styles.imagePickerIconContainer}>
+                  <ImageIcon size={32} color="#F3B62B" />
+                </View>
+                <Text style={styles.imagePickerText}>Choose from Gallery</Text>
+              </TouchableOpacity>
             </View>
-          </ScrollView>
-        </SafeAreaView >
-      )}
-
-    </>
+            
+            <TouchableOpacity 
+              style={styles.cancelButton}
+              onPress={() => setShowImagePickerModal(false)}
+            >
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  container: {
     flex: 1,
-    backgroundColor: "#ffffff",
+    backgroundColor: "#f8f8f8",
   },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 12,
+    backgroundColor: "#fff",
     borderBottomWidth: 1,
-    borderBottomColor: "#f0f0f0",
-  },
-  headerTitleContainer: {
-    flex: 1,
-    alignItems: "center",
+    borderBottomColor: "#eee",
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#1976D2",
-    marginLeft: 20,
+    fontSize: 20,
+    fontWeight: "600",
+    color: "#333",
+  },
+  menuButton: {
+    padding: 8,
   },
   scrollView: {
     flex: 1,
   },
-  welcomeContainer: {
+  scrollViewContent: {
+    paddingBottom: 90,
+    marginBottom: 60,
+  },
+  brandBanner: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  brandBannerGradient: {
+    padding: 16,
+  },
+  brandBannerContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  brandBannerLabel: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.8)',
+    marginBottom: 4,
+  },
+  brandBannerName: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  brandBannerButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  brandBannerButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  welcomeSection: {
+    backgroundColor: "#fff",
+    paddingHorizontal: 16,
+    paddingVertical: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
+  },
+  welcomeContent: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   welcomeText: {
-    margin: 0,
-    fontSize: 16,
-    color: "#666666",
-  },
-  sellerName: {
     fontSize: 24,
-    fontWeight: "bold",
-    color: "#1976D2",
+    fontWeight: "700",
+    color: "#333",
     marginBottom: 4,
   },
-  brandName: {
-    fontSize: 50,
-    color: "#F3B62B",
-    fontWeight: "500",
-    fontFamily: 'LavishlyYours-Regular',
-  },
-  // Referral Code Section
-  referralCodeContainer: {
-    backgroundColor: "#E3F2FD",
-    marginHorizontal: 20,
-    marginBottom: 24,
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "#BBDEFB",
-  },
-  referralCodeHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  referralCodeTitle: {
+  roleText: {
     fontSize: 16,
-    fontWeight: "600",
-    color: "#1976D2",
+    color: "#666",
   },
-  shareButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#ffffff",
-    alignItems: "center",
+  profileButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    overflow: "hidden",
+  },
+  profileImage: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+  },
+  profilePlaceholder: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#f0f0f0",
     justifyContent: "center",
-  },
-  referralCodeContent: {
-    flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#ffffff",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    marginBottom: 8,
   },
-  referralCode: {
-    flex: 1,
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#333333",
-    letterSpacing: 1,
-  },
-  copyButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#F0F7FF",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  generateButton: {
-    flex: 1,
-    backgroundColor: "#1976D2",
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  generateButtonText: {
-    color: "#ffffff",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  referralCodeInfo: {
-    fontSize: 14,
-    color: "#666666",
-    lineHeight: 20,
-  },
-  statsContainer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    marginBottom: 24,
-  },
-  statCard: {
-    width: (width - 75) / 3,
-    backgroundColor: "#f9f9f9",
+  brandSection: {
+    backgroundColor: "#fff",
+    marginTop: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
     borderRadius: 12,
-    padding: 12,
-    alignItems: "center",
+    marginHorizontal: 16,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.12,
-    shadowRadius: 2,
-    elevation: 1,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  statIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 8,
-  },
-  statValue: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#333333",
-    marginBottom: 4,
-  },
-  statLabel: {
-    fontSize: 12,
-    color: "#666666",
-  },
-  buyRequestsContainer: {
-    paddingHorizontal: 20,
-    marginBottom: 24,
-  },
-  notificationsContainer: {
-    paddingHorizontal: 20,
-    marginBottom: 24,
-  },
-  sectionTitleRow: {
+  sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
@@ -1586,757 +1205,491 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: "bold",
-    color: "#333333",
+    fontWeight: "600",
+    color: "#333",
   },
-  viewAllButton: {
-    padding: 8,
-  },
-  viewAllButtonText: {
+  seeAllText: {
     fontSize: 14,
-    color: "#1976D2",
+    color: "#F3B62B",
     fontWeight: "500",
   },
-  buyRequestCard: {
-    backgroundColor: "#FFF8E1",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  buyRequestHeader: {
+  brandCard: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 12,
   },
-  buyRequestIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#ffffff",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 12,
-  },
-  buyRequestTitleContainer: {
-    flex: 1,
-  },
-  buyRequestTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#333333",
-  },
-  buyRequestTime: {
-    fontSize: 12,
-    color: "#9e9e9e",
-    marginTop: 2,
-  },
-  buyRequestDetailsContainer: {
-    backgroundColor: "#ffffff",
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-  },
-  buyRequestDetailRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 6,
-  },
-  buyRequestDetailIcon: {
-    marginRight: 8,
-  },
-  buyRequestDetailLabel: {
-    fontSize: 14,
-    color: "#666666",
-    width: 100,
-  },
-  buyRequestDetailValue: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#333333",
-    flex: 1,
-  },
-  buyRequestActions: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  buyRequestActionButton: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 8,
-    paddingVertical: 10,
-    marginHorizontal: 4,
-  },
-  acceptButton: {
-    backgroundColor: "#4CAF50",
-  },
-  declineButton: {
-    backgroundColor: "#E53935",
-  },
-  buyRequestActionText: {
-    color: "#ffffff",
-    fontSize: 14,
-    fontWeight: "600",
-    marginLeft: 8,
-  },
-  notificationCard: {
-    backgroundColor: "#f9f9f9",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  unreadNotification: {
-    backgroundColor: "#E3F2FD",
-  },
-  notificationIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#ffffff",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 12,
-  },
-  notificationTitleContainer: {
-    flex: 1,
-  },
-  notificationTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#333333",
-  },
-  notificationTime: {
-    fontSize: 12,
-    color: "#9e9e9e",
-    marginTop: 2,
-  },
-  unreadIndicator: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: "#1976D2",
-    position: "absolute",
-    top: 0,
-    right: 0,
-  },
-  notificationMessage: {
-    fontSize: 14,
-    color: "#666666",
-    marginBottom: 12,
-  },
-  customerDetailsContainer: {
-    backgroundColor: "#ffffff",
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-  },
-  customerDetailsTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#333333",
-    marginBottom: 8,
-  },
-  customerDetailRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 4,
-    paddingLeft: 8,
-  },
-  customerDetailIcon: {
-    marginRight: 8,
-  },
-  customerDetailText: {
-    fontSize: 14,
-    color: "#666666",
-  },
-  rateDetailsContainer: {
-    backgroundColor: "#FFF8E1",
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-  },
-  rateDetailsTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#333333",
-    marginBottom: 8,
-  },
-  rateDetailRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 6,
-  },
-  rateDetailIcon: {
-    marginRight: 8,
-  },
-  rateDetailText: {
-    fontSize: 14,
-    color: "#666666",
-  },
-  readStatusContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-end",
-  },
-  readStatusText: {
-    fontSize: 12,
-    color: "#43A047",
-    marginLeft: 4,
-  },
-  actionsContainer: {
-    paddingHorizontal: 20,
-    marginBottom: 24,
-  },
-  actionButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#f9f9f9",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  actionIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: "center",
-    justifyContent: "center",
+  brandImageContainer: {
     marginRight: 16,
   },
-  actionTextContainer: {
+  brandImageWrapper: {
+    width: 80,
+    height: 80,
+    borderRadius: 12,
+    overflow: "hidden",
+    position: "relative",
+  },
+  brandImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 12,
+  },
+  brandImagePlaceholder: {
+    width: 80,
+    height: 80,
+    borderRadius: 12,
+    backgroundColor: "#f0f0f0",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  addImageText: {
+    fontSize: 12,
+    color: "#666",
+    marginTop: 4,
+  },
+  editIconContainer: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    backgroundColor: "#F3B62B",
+    borderRadius: 12,
+    padding: 4,
+  },
+  brandDetails: {
     flex: 1,
   },
-  actionTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#333333",
+  brandNameLabel: {
+    fontSize: 14,
+    color: "#666",
     marginBottom: 4,
   },
-  actionDescription: {
+  brandName: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#333",
+    marginBottom: 8,
+  },
+  editBrandButton: {
+    backgroundColor: "#f0f0f0",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    alignSelf: "flex-start",
+  },
+  editBrandText: {
     fontSize: 14,
-    color: "#666666",
+    color: "#333",
+    fontWeight: "500",
   },
-  infoCardContainer: {
-    marginHorizontal: 20,
-    marginBottom: 100,
+  statsSection: {
+    marginTop: 16,
+    marginHorizontal: 16,
   },
-  infoCard: {
+  statsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 16,
+  },
+  statCard: {
+    backgroundColor: "#fff",
     borderRadius: 12,
     padding: 16,
+    width: "48%",
+    alignItems: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 2,
   },
-  infoCardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
+  statIconContainer: {
+    backgroundColor: "rgba(243, 182, 43, 0.1)",
+    borderRadius: 12,
+    padding: 12,
     marginBottom: 12,
   },
-  infoCardTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#1976D2",
-    marginLeft: 8,
-  },
-  infoCardContent: {
-    fontSize: 14,
-    color: "#333333",
-    lineHeight: 22,
-  },
-
-
-  //admin
-  menuButton: {
-    // padding: 5,
-  },
-  notificationButton: {
-    padding: 8,
-    position: "relative",
-  },
-  notificationBadge: {
-    position: "absolute",
-    top: 4,
-    right: 4,
-    backgroundColor: "#E53935",
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  notificationBadgeText: {
-    color: "#ffffff",
-    fontSize: 12,
-    fontWeight: "bold",
-  },
-  adminName: {
+  statValue: {
     fontSize: 24,
-    fontWeight: "bold",
-    color: "#1976D2",
+    fontWeight: "700",
+    color: "#333",
+    marginBottom: 4,
   },
-  singleStatCard: {
-    width: CARD_WIDTH,
-    borderRadius: 16,
-    padding: 16,
+  statLabel: {
+    fontSize: 14,
+    color: "#666",
+  },
+  quickActionsSection: {
+    backgroundColor: "#fff",
+    marginTop: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderRadius: 12,
+    marginHorizontal: 16,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 3,
+    elevation: 2,
   },
-  statIconContainerAdmin: {
-    marginBottom: 12,
-  },
-  statTrend: {
-    position: "absolute",
-    top: 16,
-    right: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  statTrendText: {
-    fontSize: 12,
-    fontWeight: "bold",
-    color: "#ffffff",
-    marginLeft: 2,
-  },
-  sectionContainer: {
-    marginBottom: 24,
-  },
-  quickActionsContainer: {
+  quickActionsGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    paddingHorizontal: 20,
     justifyContent: "space-between",
+    marginTop: 16,
   },
-  quickActionButton: {
-    width: "48%",
-    backgroundColor: "#f9f9f9",
+  quickActionCard: {
+    backgroundColor: "#f8f8f8",
     borderRadius: 12,
     padding: 16,
-    marginBottom: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  quickActionIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: "48%",
     alignItems: "center",
-    justifyContent: "center",
+    marginBottom: 16,
+  },
+  quickActionIconContainer: {
+    backgroundColor: "rgba(243, 182, 43, 0.1)",
+    borderRadius: 12,
+    padding: 12,
     marginBottom: 12,
   },
   quickActionText: {
     fontSize: 14,
     fontWeight: "500",
-    color: "#333333",
+    color: "#333",
+    textAlign: "center",
   },
-  activitiesContainer: {
-    paddingHorizontal: 20,
-  },
-  activityItem: {
-    flexDirection: "row",
-    backgroundColor: "#f9f9f9",
+  buyRequestsSection: {
+    backgroundColor: "#fff",
+    marginTop: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
     borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  activityIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 12,
-  },
-  activityContent: {
-    flex: 1,
-  },
-  activityTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#333333",
-    marginBottom: 4,
-  },
-  activityDescription: {
-    fontSize: 14,
-    color: "#666666",
-    marginBottom: 8,
-  },
-  activityMeta: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  activityTime: {
-    fontSize: 12,
-    color: "#9e9e9e",
-    marginLeft: 4,
-  },
-  emptyActivities: {
-    padding: 20,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  emptyActivitiesText: {
-    fontSize: 16,
-    color: "#9e9e9e",
-  },
-  logoutContainer: {
-    paddingHorizontal: 20,
-    paddingBottom: 30,
-    marginTop: 10,
-  },
-  logoutButton: {
-    backgroundColor: "#E53935",
-    borderRadius: 12,
-    padding: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
+    marginHorizontal: 16,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 3,
-    marginBottom: 70,
+    elevation: 2,
   },
-  logoutText: {
-    color: "#ffffff",
+  emptyStateContainer: {
+    alignItems: "center",
+    padding: 24,
+  },
+  emptyStateText: {
     fontSize: 16,
     fontWeight: "600",
-    marginLeft: 10,
+    color: "#666",
+    marginTop: 16,
   },
-  // Notification Modal Styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "flex-end",
-  },
-  notificationContainer: {
-    backgroundColor: "#ffffff",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    height: "80%",
-    paddingBottom: 20,
-  },
-  notificationHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f0f0f0",
-  },
-  notificationHeaderTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#333333",
-  },
-  closeButton: {
-    padding: 8,
-  },
-  notificationActions: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-  },
-  markAllReadButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 8,
-  },
-  markAllReadText: {
+  emptyStateSubtext: {
     fontSize: 14,
-    color: "#1976D2",
-    marginLeft: 4,
+    color: "#999",
+    textAlign: "center",
+    marginTop: 8,
   },
-  notificationsList: {
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-  },
-  notificationItem: {
-    flexDirection: "row",
-    backgroundColor: "#ffffff",
+  buyRequestCard: {
+    backgroundColor: "#f8f8f8",
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-    position: "relative",
   },
-  notificationItemUnread: {
-    backgroundColor: "#f0f7ff",
+  buyRequestHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  buyRequestUser: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  customerAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 8,
+  },
+  customerAvatarPlaceholder: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#f0f0f0",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 8,
+  },
+  customerName: {
+    fontSize: 16,
+    fontWeight: "500",
+    color: "#333",
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  pendingBadge: {
+    backgroundColor: "rgba(33, 150, 243, 0.1)",
+  },
+  acceptedBadge: {
+    backgroundColor: "rgba(76, 175, 80, 0.1)",
+  },
+  declinedBadge: {
+    backgroundColor: "rgba(244, 67, 54, 0.1)",
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: "500",
+  },
+  pendingText: {
+    color: "#2196F3",
+  },
+  acceptedText: {
+    color: "#4CAF50",
+  },
+  declinedText: {
+    color: "#F44336",
+  },
+  buyRequestDetails: {
+    marginBottom: 12,
+  },
+  productName: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#333",
+    marginBottom: 4,
+  },
+  requestTime: {
+    fontSize: 12,
+    color: "#999",
+  },
+  buyRequestActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+  },
+  actionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 6,
+    marginLeft: 8,
+  },
+  declineButton: {
+    backgroundColor: "#f8f8f8",
+    borderWidth: 1,
+    borderColor: "#E53935",
+  },
+  acceptButton: {
+    backgroundColor: "#F3B62B",
+  },
+  declineButtonText: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#E53935",
+    marginLeft: 4,
+  },
+  acceptButtonText: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#fff",
+    marginLeft: 4,
+  },
+  referralSection: {
+    backgroundColor: "#fff",
+    marginTop: 16,
+    marginBottom: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderRadius: 12,
+    marginHorizontal: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  referralCard: {
+    backgroundColor: "#f8f8f8",
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 16,
+  },
+  referralHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  referralIconContainer: {
+    backgroundColor: "rgba(243, 182, 43, 0.1)",
+    borderRadius: 12,
+    padding: 8,
+    marginRight: 12,
+  },
+  referralTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#333",
+  },
+  referralDescription: {
+    fontSize: 14,
+    color: "#666",
+    marginBottom: 16,
+  },
+  referralCodeContainer: {
+    backgroundColor: "#fff",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+  },
+  referralCode: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#F3B62B",
+    textAlign: "center",
+    marginBottom: 12,
+  },
+  referralActions: {
+    flexDirection: "row",
+    justifyContent: "center",
+  },
+  referralAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: 12,
+  },
+  referralActionText: {
+    fontSize: 14,
+    color: "#666",
+    marginLeft: 4,
+  },
+  generateCodeButton: {
+    backgroundColor: "#F3B62B",
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  generateCodeText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#fff",
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  notificationsModal: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    width: "90%",
+    maxHeight: "80%",
+    padding: 16,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#333",
+  },
+  emptyNotifications: {
+    alignItems: "center",
+    padding: 24,
+  },
+  emptyNotificationsText: {
+    fontSize: 16,
+    color: "#666",
+    marginTop: 16,
+  },
+  markAllReadButton: {
+    alignSelf: "flex-end",
+    marginBottom: 12,
+  },
+  markAllReadText: {
+    fontSize: 14,
+    color: "#F3B62B",
+    fontWeight: "500",
+  },
+  notificationsList: {
+    maxHeight: 400,
+  },
+  notificationItem: {
+    flexDirection: "row",
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
+  },
+  unreadNotification: {
+    backgroundColor: "rgba(243, 182, 43, 0.05)",
+  },
+  notificationIcon: {
+    marginRight: 12,
   },
   notificationContent: {
     flex: 1,
   },
-  emptyNotifications: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingVertical: 40,
-  },
-  emptyNotificationsText: {
+  notificationTitle: {
     fontSize: 16,
-    color: "#9e9e9e",
+    fontWeight: "600",
+    color: "#333",
+    marginBottom: 4,
+  },
+  notificationMessage: {
+    fontSize: 14,
+    color: "#666",
+    marginBottom: 4,
+  },
+  notificationTime: {
+    fontSize: 12,
+    color: "#999",
+  },
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#F3B62B",
+    marginLeft: 8,
+  },
+  imagePickerModal: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    width: "90%",
+    padding: 16,
+  },
+  imagePickerOptions: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    marginVertical: 24,
+  },
+  imagePickerOption: {
+    alignItems: "center",
+  },
+  imagePickerIconContainer: {
+    backgroundColor: "rgba(243, 182, 43, 0.1)",
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 8,
+  },
+  imagePickerText: {
+    fontSize: 14,
+    color: "#333",
+  },
+  cancelButton: {
+    backgroundColor: "#f0f0f0",
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: "center",
     marginTop: 16,
   },
-  userDetailsContainer: {
-    backgroundColor: "#f5f5f5",
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
-  },
-  userDetailRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 6,
-  },
-  userDetailIcon: {
-    marginRight: 8,
-  },
-  userDetailText: {
-    fontSize: 13,
-    color: "#666666",
-  },
-  premiumUser: {
+  cancelButtonText: {
+    fontSize: 16,
     fontWeight: "500",
-  },
-  referralDetailsContainer: {
-    backgroundColor: "#FFF8E1",
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
-  },
-  referralDetailRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 6,
-  },
-  referralDetailIcon: {
-    marginRight: 8,
-  },
-  referralDetailText: {
-    fontSize: 13,
-    color: "#666666",
-  },
-
-  // Contact Request Notification Styles
-  contactRequestNotification: {
-    flex: 1,
-  },
-  contactRequestHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 12,
-    position: "relative",
-  },
-  contactRequestIcon: {
-    marginRight: 12,
-  },
-  contactRequestTitleContainer: {
-    flex: 1,
-  },
-  contactRequestTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#333333",
-  },
-  contactRequestTime: {
-    fontSize: 12,
-    color: "#9e9e9e",
-    marginTop: 2,
-  },
-  contactRequestMessage: {
-    fontSize: 14,
-    color: "#666666",
-    marginBottom: 12,
-  },
-  contactDetailsContainer: {
-    backgroundColor: "#f5f5f5",
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-  },
-  contactDetailSection: {
-    marginBottom: 8,
-  },
-  contactDetailSectionTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#333333",
-    marginBottom: 6,
-  },
-  contactDetailRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 4,
-    paddingLeft: 8,
-  },
-  contactDetailIcon: {
-    marginRight: 8,
-  },
-  contactDetailText: {
-    fontSize: 14,
-    color: "#666666",
-  },
-  contactDetailDivider: {
-    height: 1,
-    backgroundColor: "#e0e0e0",
-    marginVertical: 8,
-  },
-
-  // Role Change Notification Styles
-  roleChangeNotification: {
-    flexDirection: "row",
-    flex: 1,
-  },
-
-  // Payment Success Notification Styles
-  paymentSuccessNotification: {
-    flexDirection: "row",
-    flex: 1,
-  },
-  statValueAdmin: {
-    fontSize: 24,
-    fontWeight: "bold",
-    color: "#ffffff",
-    marginBottom: 4,
-  },
-  statLabelAdmin: {
-    fontSize: 14,
-    color: "#ffffff",
-    opacity: 0.9,
-  },
-  sectionTitleAdmin: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#333333",
-    marginBottom: 16,
-    paddingHorizontal: 20,
-  },
-
-
-  // customer
-  logo: {
-    width: 200,
-    height: 200,
-    resizeMode: "contain",
-    marginTop: 10,
-  },
-  headerCustomer: {
-    backgroundColor: "#002810",
-    justifyContent: "center",
-    alignItems: "center",
-    marginHorizontal: 16,
-    marginBottom: 20,
-    borderRadius: 16,
-    height: 150,
-    color: "#ffffff",
-  },
-  cardGradient: {
-    paddingHorizontal: 22,
-    paddingVertical: 10,
-    alignItems: "center",
-    borderRadius: 14,
-    justifyContent: "center",
-    marginBottom: 20,
-  },
-  customerContainer: {
-    display: "flex",
-    flexDirection: "row",
-    marginHorizontal: 16,
-    justifyContent: "space-between",
-    alignItems: "center",
-    borderRadius: 24,
-  },
-  customerText: {
-    marginTop: 15,
-    fontWeight: "bold",
-    fontSize: 14,
-    color: "#333333",
-    textAlign: "center",
-  },
-  infoCardContainerCustomer: {
-    marginHorizontal: 16,
-    marginBottom: 20,
-  },
-  brandCoverImage: {
-    width: "100%",
-    height: "100%",
-    borderRadius: 16,
-  },
-
-  // seller
-  sellerContainer: {
-    marginHorizontal: 20,
-    marginBottom: 5,
-  },
-  sellerHeader: {
-    marginBottom: 14,
-  },
-  sellerInfo: {
-    fontSize: 14,
     color: "#333",
-  },
-  sellerDetails: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#333",
-  },
-  sellerContactIcons: {
-    flex: 1,
-    flexDirection: "row",
-    gap: 15,
-    paddingBottom: 12,
-    paddingTop: 5,
-    borderBottomWidth: 2,
-    borderBottomColor: "#f0f0f0",
-  },
-  catalogueContainer: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-    marginTop: 10,
-  },
-  catalogueImage: {
-    width: 100,
-    height: 100,
-    borderRadius: 8,
   },
 });
