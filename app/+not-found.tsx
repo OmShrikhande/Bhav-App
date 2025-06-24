@@ -12,7 +12,7 @@ export default function NotFoundScreen() {
             source={images.logo}
             style={styles.logo}
           />
-          <Text style={styles.logoText}>Bhav Application</Text>
+          <Text style={styles.logoText}>BHAV Application</Text>
         </View>
       </View>
     </>

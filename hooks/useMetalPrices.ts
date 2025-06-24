@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import axios from "axios"; // Import axios
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Error function to check if there's an error with the API
 const Error = () => {
@@ -34,6 +35,8 @@ export const useMetalPrices = () => {
     lastUpdated: null,
   });
   const [loading, setLoading] = useState(false);
+  const [isUserLoggedIn, setIsUserLoggedIn] = useState(true);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Base values for generating random fluctuations
   const baseValues = useRef({
@@ -46,6 +49,22 @@ export const useMetalPrices = () => {
 
   // Function to fetch updated prices from the API
   const refreshPrices = async () => {
+    // Check if user is logged out
+    try {
+      const logoutState = await AsyncStorage.getItem('logout-in-progress');
+      if (logoutState === 'true') {
+        console.log("User logged out, stopping price updates");
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+        setIsUserLoggedIn(false);
+        return;
+      }
+    } catch (error) {
+      console.error("Error checking logout state:", error);
+    }
+
     setLoading(true);
 
     try {
@@ -212,19 +231,80 @@ export const useMetalPrices = () => {
     }
   };
 
-  // update every 2 seconds to simulate real-time updates
+  // Check login status and start/stop updates accordingly
   useEffect(() => {
-    // Initial fetch
-    refreshPrices();
-    
-    // Set up interval for updates
-    const interval = setInterval(() => {
+    const checkLoginStatus = async () => {
+      try {
+        const logoutState = await AsyncStorage.getItem('logout-in-progress');
+        setIsUserLoggedIn(logoutState !== 'true');
+      } catch (error) {
+        console.error("Error checking login status:", error);
+        setIsUserLoggedIn(true); // Default to true if we can't check
+      }
+    };
+
+    checkLoginStatus();
+
+    // Set up a listener for logout events
+    const logoutListener = setInterval(async () => {
+      try {
+        const logoutState = await AsyncStorage.getItem('logout-in-progress');
+        const newLoginState = logoutState !== 'true';
+        
+        // If login state changed from logged in to logged out
+        if (isUserLoggedIn && !newLoginState) {
+          console.log("User logged out, stopping price updates");
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
+          }
+        } 
+        // If login state changed from logged out to logged in
+        else if (!isUserLoggedIn && newLoginState) {
+          console.log("User logged in, starting price updates");
+          // Start updates if they're not already running
+          if (!intervalRef.current) {
+            refreshPrices();
+            intervalRef.current = setInterval(refreshPrices, 2000);
+          }
+        }
+        
+        setIsUserLoggedIn(newLoginState);
+      } catch (error) {
+        console.error("Error in logout listener:", error);
+      }
+    }, 1000); // Check every second
+
+    return () => {
+      clearInterval(logoutListener);
+    };
+  }, [isUserLoggedIn]);
+
+  // Start/stop price updates based on login status
+  useEffect(() => {
+    // Only start updates if user is logged in
+    if (isUserLoggedIn) {
+      console.log("Starting price updates");
+      // Initial fetch
       refreshPrices();
-    }, 2000); // Update every 2 seconds
+      
+      // Set up interval for updates
+      intervalRef.current = setInterval(() => {
+        refreshPrices();
+      }, 2000); // Update every 2 seconds
+    } else {
+      console.log("User not logged in, not starting price updates");
+    }
     
     // Clean up interval on unmount
-    return () => clearInterval(interval);
-  }, []);
+    return () => {
+      if (intervalRef.current) {
+        console.log("Cleaning up price update interval");
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [isUserLoggedIn]);
 
   return { prices, loading, refreshPrices, Error };
 };

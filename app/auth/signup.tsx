@@ -169,7 +169,7 @@ export default function SignupScreen() {
           });
         } else {
           Alert.alert(
-            "Welcome to Bhav App! 🎉",
+            "Welcome to BHAV App! 🎉",
             "Your customer account has been created successfully.\n\n✅ Browse live gold & silver rates\n✅ Connect with verified sellers\n✅ Make secure transactions\n\nYou will now be redirected to the dashboard.",
             [
               {
@@ -228,7 +228,7 @@ export default function SignupScreen() {
           <View style={styles.header}>
             <Text style={styles.title}>Create Account</Text>
             <Text style={styles.subtitle}>
-              Join Bhav App to buy and sell precious metals
+              Join BHAV App to buy and sell precious metals
             </Text>
           </View>
 

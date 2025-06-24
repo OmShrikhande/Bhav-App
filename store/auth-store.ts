@@ -342,7 +342,7 @@ const initialNotifications: Notification[] = [
   {
     id: '1',
     title: 'Welcome to Admin Dashboard',
-    message: 'Welcome to Bhav admin dashboard. You can manage users, view analytics, and monitor transactions here.',
+    message: 'Welcome to BHAV admin dashboard. You can manage users, view analytics, and monitor transactions here.',
     timestamp: Date.now() - 3600000, // 1 hour ago
     read: false,
     type: 'system',

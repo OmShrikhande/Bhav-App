@@ -25,6 +25,7 @@ import { images } from "@/constants/images";
 import { router, useFocusEffect } from "expo-router";
 import colors from "@/constants/colors";
 import { useMetalPrices } from "@/hooks/useMetalPrices";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type TabType = 'all' | 'gold' | 'silver';
 
@@ -350,15 +351,40 @@ export default function RatesScreen() {
   
   // Fetch rates from Firestore when component mounts and user is logged in
   useEffect(() => {
-    // Only fetch rates if user is logged in
-    if (currentUser) {
-      fetchRates();
-    }
+    // Check if user is logged out
+    const checkLogoutState = async () => {
+      try {
+        const logoutState = await AsyncStorage.getItem('logout-in-progress');
+        // Only fetch rates if user is logged in and not in the process of logging out
+        if (currentUser && logoutState !== 'true') {
+          fetchRates();
+        }
+      } catch (error) {
+        console.error("Error checking logout state:", error);
+        // If we can't check logout state, only fetch if user exists
+        if (currentUser) {
+          fetchRates();
+        }
+      }
+    };
+    
+    checkLogoutState();
   }, [currentUser]);
 
   useFocusEffect(
     useCallback(() => {
       const fetchInventory = async () => {
+        // Check if user is logged out
+        try {
+          const logoutState = await AsyncStorage.getItem('logout-in-progress');
+          if (logoutState === 'true') {
+            console.log("User logged out, not fetching inventory");
+            return;
+          }
+        } catch (error) {
+          console.error("Error checking logout state:", error);
+        }
+        
         setIsLoading(true);
         try {
           const items = useAuthStore.getState().getAllInventoryItems
@@ -377,111 +403,150 @@ export default function RatesScreen() {
 
   // referral
   useEffect(() => {
-    if (user && (isCustomer || isAdmin)) {
-      // Fetch seller referrals for this user
-      const referrals = useAuthStore.getState().getSellerReferralsForCustomer(user.id);
-      // Get seller details for each referral
-      const sellers = referrals
-        .map(ref => getUserById(ref.sellerId))
-        .filter(Boolean) as User[];
-      setAddedSellers(sellers);
+    const fetchReferrals = async () => {
+      // Check if user is logged out
+      try {
+        const logoutState = await AsyncStorage.getItem('logout-in-progress');
+        if (logoutState === 'true') {
+          console.log("User logged out, not fetching referrals");
+          return;
+        }
+      } catch (error) {
+        console.error("Error checking logout state:", error);
+      }
+      
+      if (user && (isCustomer || isAdmin)) {
+        // Fetch seller referrals for this user
+        const referrals = useAuthStore.getState().getSellerReferralsForCustomer(user.id);
+        // Get seller details for each referral
+        const sellers = referrals
+          .map(ref => getUserById(ref.sellerId))
+          .filter(Boolean) as User[];
+        setAddedSellers(sellers);
 
-      // Load products for each seller
-      const productsMap: { [key: string]: InventoryItem[] } = {};
-      sellers.forEach(seller => {
-        productsMap[seller.id] = useAuthStore.getState()
-          .getInventoryItemsForSeller(seller.id)
-          .filter(item => item.isVisible);
-      });
-      setSellerProducts(productsMap);
-    }
+        // Load products for each seller
+        const productsMap: { [key: string]: InventoryItem[] } = {};
+        sellers.forEach(seller => {
+          productsMap[seller.id] = useAuthStore.getState()
+            .getInventoryItemsForSeller(seller.id)
+            .filter(item => item.isVisible);
+        });
+        setSellerProducts(productsMap);
+      }
+    };
+    
+    fetchReferrals();
   }, [user, isCustomer, isAdmin, getUserById]);
 
   useEffect(() => {
-    // Gold Buy Price
-    if (prices.gold?.buy && prevGoldBuy.current !== null) {
-      const currentPrice = Number(prices.gold.buy);
-      const previousPrice = Number(prevGoldBuy.current);
-
-      if (currentPrice > previousPrice) {
-        setGoldBuyColor("#4CAF50"); // Green
-        if (goldBuyTimer.current) clearTimeout(goldBuyTimer.current);
-        goldBuyTimer.current = setTimeout(() => {
-          setGoldBuyColor("#333333"); // Back to black
-        }, 1000);
-      } else if (currentPrice < previousPrice) {
-        setGoldBuyColor("#F44336"); // Red
-        if (goldBuyTimer.current) clearTimeout(goldBuyTimer.current);
-        goldBuyTimer.current = setTimeout(() => {
-          setGoldBuyColor("#333333"); // Back to black
-        }, 1000);
+    // Check if user is logged out before processing price updates
+    const checkLogoutAndProcessPrices = async () => {
+      try {
+        const logoutState = await AsyncStorage.getItem('logout-in-progress');
+        if (logoutState === 'true') {
+          console.log("User logged out, not processing price updates");
+          return;
+        }
+        
+        // Process price updates since user is logged in
+        processPriceUpdates();
+      } catch (error) {
+        console.error("Error checking logout state:", error);
+        // Proceed with normal processing if we can't check logout state
+        processPriceUpdates();
       }
-    }
-    prevGoldBuy.current = typeof prices.gold?.buy === "string" ? prices.gold.buy : null;
+    };
+    
+    // Function to process all price updates
+    const processPriceUpdates = () => {
+      // Gold Buy Price
+      if (prices.gold?.buy && prevGoldBuy.current !== null) {
+        const currentPrice = Number(prices.gold.buy);
+        const previousPrice = Number(prevGoldBuy.current);
 
-    // Gold Sell Price
-    if (prices.gold?.sell && prevGoldSell.current !== null) {
-      const currentPrice = Number(prices.gold.sell);
-      const previousPrice = Number(prevGoldSell.current);
-
-      if (currentPrice > previousPrice) {
-        setGoldSellColor("#4CAF50"); // Green
-        if (goldSellTimer.current) clearTimeout(goldSellTimer.current);
-        goldSellTimer.current = setTimeout(() => {
-          setGoldSellColor("#333333"); // Back to black
-        }, 1000);
-      } else if (currentPrice < previousPrice) {
-        setGoldSellColor("#F44336"); // Red
-        if (goldSellTimer.current) clearTimeout(goldSellTimer.current);
-        goldSellTimer.current = setTimeout(() => {
-          setGoldSellColor("#333333"); // Back to black
-        }, 1000);
+        if (currentPrice > previousPrice) {
+          setGoldBuyColor("#4CAF50"); // Green
+          if (goldBuyTimer.current) clearTimeout(goldBuyTimer.current);
+          goldBuyTimer.current = setTimeout(() => {
+            setGoldBuyColor("#333333"); // Back to black
+          }, 1000);
+        } else if (currentPrice < previousPrice) {
+          setGoldBuyColor("#F44336"); // Red
+          if (goldBuyTimer.current) clearTimeout(goldBuyTimer.current);
+          goldBuyTimer.current = setTimeout(() => {
+            setGoldBuyColor("#333333"); // Back to black
+          }, 1000);
+        }
       }
-    }
-    prevGoldSell.current = typeof prices.gold?.sell === "string" ? prices.gold.sell : null;
+      prevGoldBuy.current = typeof prices.gold?.buy === "string" ? prices.gold.buy : null;
 
-    // Silver Buy Price
-    if (prices.silver?.buy && prevSilverBuy.current !== null) {
-      const currentPrice = Number(prices.silver.buy);
-      const previousPrice = Number(prevSilverBuy.current);
+      // Gold Sell Price
+      if (prices.gold?.sell && prevGoldSell.current !== null) {
+        const currentPrice = Number(prices.gold.sell);
+        const previousPrice = Number(prevGoldSell.current);
 
-      if (currentPrice > previousPrice) {
-        setSilverBuyColor("#4CAF50"); // Green
-        if (silverBuyTimer.current) clearTimeout(silverBuyTimer.current);
-        silverBuyTimer.current = setTimeout(() => {
-          setSilverBuyColor("#333333"); // Back to black
-        }, 1000);
-      } else if (currentPrice < previousPrice) {
-        setSilverBuyColor("#F44336"); // Red
-        if (silverBuyTimer.current) clearTimeout(silverBuyTimer.current);
-        silverBuyTimer.current = setTimeout(() => {
-          setSilverBuyColor("#333333"); // Back to black
-        }, 1000);
+        if (currentPrice > previousPrice) {
+          setGoldSellColor("#4CAF50"); // Green
+          if (goldSellTimer.current) clearTimeout(goldSellTimer.current);
+          goldSellTimer.current = setTimeout(() => {
+            setGoldSellColor("#333333"); // Back to black
+          }, 1000);
+        } else if (currentPrice < previousPrice) {
+          setGoldSellColor("#F44336"); // Red
+          if (goldSellTimer.current) clearTimeout(goldSellTimer.current);
+          goldSellTimer.current = setTimeout(() => {
+            setGoldSellColor("#333333"); // Back to black
+          }, 1000);
+        }
       }
-    }
-    prevSilverBuy.current = typeof prices.silver?.buy === "string" ? prices.silver.buy : null;
+      prevGoldSell.current = typeof prices.gold?.sell === "string" ? prices.gold.sell : null;
 
-    // Silver Sell Price
-    if (prices.silver?.sell && prevSilverSell.current !== null) {
-      const currentPrice = Number(prices.silver.sell);
-      const previousPrice = Number(prevSilverSell.current);
+      // Silver Buy Price
+      if (prices.silver?.buy && prevSilverBuy.current !== null) {
+        const currentPrice = Number(prices.silver.buy);
+        const previousPrice = Number(prevSilverBuy.current);
 
-      if (currentPrice > previousPrice) {
-        setSilverSellColor("#4CAF50"); // Green
-        if (silverSellTimer.current) clearTimeout(silverSellTimer.current);
-        silverSellTimer.current = setTimeout(() => {
-          setSilverSellColor("#333333"); // Back to black
-        }, 1000);
-      } else if (currentPrice < previousPrice) {
-        setSilverSellColor("#F44336"); // Red
-        if (silverSellTimer.current) clearTimeout(silverSellTimer.current);
-        silverSellTimer.current = setTimeout(() => {
-          setSilverSellColor("#333333"); // Back to black
-        }, 1000);
+        if (currentPrice > previousPrice) {
+          setSilverBuyColor("#4CAF50"); // Green
+          if (silverBuyTimer.current) clearTimeout(silverBuyTimer.current);
+          silverBuyTimer.current = setTimeout(() => {
+            setSilverBuyColor("#333333"); // Back to black
+          }, 1000);
+        } else if (currentPrice < previousPrice) {
+          setSilverBuyColor("#F44336"); // Red
+          if (silverBuyTimer.current) clearTimeout(silverBuyTimer.current);
+          silverBuyTimer.current = setTimeout(() => {
+            setSilverBuyColor("#333333"); // Back to black
+          }, 1000);
+        }
       }
-    }
-    prevSilverSell.current = typeof prices.silver?.sell === "string" ? prices.silver.sell : null;
+      prevSilverBuy.current = typeof prices.silver?.buy === "string" ? prices.silver.buy : null;
 
+      // Silver Sell Price
+      if (prices.silver?.sell && prevSilverSell.current !== null) {
+        const currentPrice = Number(prices.silver.sell);
+        const previousPrice = Number(prevSilverSell.current);
+
+        if (currentPrice > previousPrice) {
+          setSilverSellColor("#4CAF50"); // Green
+          if (silverSellTimer.current) clearTimeout(silverSellTimer.current);
+          silverSellTimer.current = setTimeout(() => {
+            setSilverSellColor("#333333"); // Back to black
+          }, 1000);
+        } else if (currentPrice < previousPrice) {
+          setSilverSellColor("#F44336"); // Red
+          if (silverSellTimer.current) clearTimeout(silverSellTimer.current);
+          silverSellTimer.current = setTimeout(() => {
+            setSilverSellColor("#333333"); // Back to black
+          }, 1000);
+        }
+      }
+      prevSilverSell.current = typeof prices.silver?.sell === "string" ? prices.silver.sell : null;
+    };
+    
+    // Call the check function
+    checkLogoutAndProcessPrices();
+    
     // Cleanup function
     return () => {
       if (goldBuyTimer.current) clearTimeout(goldBuyTimer.current);
@@ -570,7 +635,7 @@ export default function RatesScreen() {
               <Text style={styles.brandName}>{user.brandName}</Text>
             ) : (
               <Image
-                source={images.bhavLogo}
+                source={images.BHAVLogo}
                 style={styles.logo}
               />
             )}
@@ -584,7 +649,7 @@ export default function RatesScreen() {
           //   ) : selectedSeller?.brandName ? (
           //     <Text style={styles.brandName}>{selectedSeller.brandName}</Text>
           //   ) : (
-          //     <Image source={images.bhavLogo} style={styles.logo} />
+          //     <Image source={images.BHAVLogo} style={styles.logo} />
           //   )}
           // </View>
           <>
@@ -595,12 +660,12 @@ export default function RatesScreen() {
                 ) : selectedSeller.brandName ? (
                   <Text style={styles.brandName}>{selectedSeller.brandName}</Text>
                 ) : (
-                  <Image source={images.bhavLogo} style={styles.logo} />
+                  <Image source={images.BHAVLogo} style={styles.logo} />
                 )}
               </View>
             ) : (
               <View style={styles.top}>
-                <Image source={images.bhavLogo} style={styles.logo} />
+                <Image source={images.BHAVLogo} style={styles.logo} />
               </View>
             )}
           </>

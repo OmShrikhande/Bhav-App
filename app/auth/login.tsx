@@ -117,7 +117,7 @@ export default function LoginScreen() {
               style={styles.logo}
               contentFit="contain"
             />
-            <Text style={styles.logoText}>Bhav App</Text>
+            <Text style={styles.logoText}>BHAV App</Text>
           </View>
 
           <Text style={styles.welcomeText}>Welcome Back</Text>

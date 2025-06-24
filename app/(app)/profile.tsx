@@ -522,7 +522,7 @@ export default function ProfileScreen() {
     
     try {
       await Share.share({
-        message: `Join me on Bhav App using my referral code: ${userDetails.referralCode}`
+        message: `Join me on BHAV App using my referral code: ${userDetails.referralCode}`
       });
     } catch (error) {
       console.error('Error sharing referral code:', error);

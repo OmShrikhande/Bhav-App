@@ -51,7 +51,7 @@ export default function PaymentScreen() {
   const successOpacity = React.useRef(new Animated.Value(0)).current;
 
   // UPI details
-  const merchantUpiId = "bhavApp@ybl";
+  const merchantUpiId = "BHAVApp@ybl";
   // Fix for TypeScript error - ensure userId and planId are strings before using substring
   const userIdStr = typeof userId === 'string' ? userId : Array.isArray(userId) ? userId[0] : '';
   const planIdStr = typeof planId === 'string' ? planId : Array.isArray(planId) ? planId[0] : '';

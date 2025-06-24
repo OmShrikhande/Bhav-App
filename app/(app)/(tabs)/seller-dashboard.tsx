@@ -400,11 +400,11 @@ export default function SellerDashboardScreen() {
 
     try {
       const brandName = currentUser.brandName || currentUser.fullName || currentUser.name;
-      const message = `Add ${brandName} as your seller in Bhav app using my referral code: ${referralCode}`;
+      const message = `Add ${brandName} as your seller in BHAV app using my referral code: ${referralCode}`;
 
       await Share.share({
         message,
-        title: "Bhav Seller Referral Code"
+        title: "BHAV Seller Referral Code"
       });
 
       // Trigger haptic feedback on success
@@ -910,7 +910,7 @@ export default function SellerDashboardScreen() {
             </View>
             
             <Text style={styles.referralDescription}>
-              Invite customers to connect with you on Bhav app using your unique referral code.
+              Invite customers to connect with you on BHAV app using your unique referral code.
             </Text>
             
             {referralCode ? (

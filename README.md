@@ -18,7 +18,7 @@
 1. **CLONE THE REPOSITORY**
    ```bash
    git clone <repository-url>
-   cd Bhav-App
+   cd BHAV-App
    ```
 
 2. **INSTALL THE DEPENDENCIES OR DIE TRYING**

@@ -22,7 +22,7 @@ import { useRouter } from "expo-router";
 import * as Clipboard from 'expo-clipboard';
 
 export default function ShareScreen() {
-  const baseAppLink = "https://bhavapp.com/app";
+  const baseAppLink = "https://BHAVapp.com/app";
   const { user, logout, generateReferralCode, } = useAuthStore();
   const router = useRouter();
   const [referralCode, setReferralCode] = useState<string | null>();
@@ -80,8 +80,8 @@ export default function ShareScreen() {
 
     try {
       const message = user?.role === 'admin' && referralCode
-        ? `Check out Bhav app for real-time gold and silver rates! Use my referral code ${referralCode} to get premium access. ${appLink}`
-        : `Check out Bhav app for real-time gold and silver rates! ${appLink}`;
+        ? `Check out BHAV app for real-time gold and silver rates! Use my referral code ${referralCode} to get premium access. ${appLink}`
+        : `Check out BHAV app for real-time gold and silver rates! ${appLink}`;
 
       await RNShare.share({
         message,
@@ -136,7 +136,7 @@ export default function ShareScreen() {
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Share App</Text>
           <Text style={styles.headerSubtitle}>
-            Share Bhav App with friends and family
+            Share BHAV App with friends and family
           </Text>
         </View>
 
@@ -249,7 +249,7 @@ export default function ShareScreen() {
           </TouchableOpacity>
 
           <View style={styles.benefitsContainer}>
-            <Text style={styles.benefitsTitle}>Why Share Bhav App?</Text>
+            <Text style={styles.benefitsTitle}>Why Share BHAV App?</Text>
 
             <View style={styles.benefitCard}>
               <View style={styles.benefitIconContainer}>
