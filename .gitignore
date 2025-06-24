@@ -1,0 +1,129 @@
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# dependencies
+node_modules/
+/.pnp
+.pnp.js
+package-lock.json
+yarn.lock
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.apk
+*.aab
+*.hprof
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+logs
+*.log
+
+# macOS
+.DS_Store
+*.pem
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# IDE - VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# IDE - JetBrains (WebStorm, IntelliJ, etc)
+.idea/
+*.iml
+*.iws
+*.ipr
+.idea_modules/
+
+# IDE - Android Studio
+.gradle
+/local.properties
+/.idea/workspace.xml
+/.idea/libraries
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+.env*.local
+google-services.json
+GoogleService-Info.plist
+
+# Build and output
+/build/
+/out/
+/dist/
+/coverage/
+.vercel
+.next/
+.nuxt/
+.cache/
+.parcel-cache/
+
+# Temporary files
+.tmp/
+.temp/
+*.swp
+*.swo
+
+# TypeScript
+*.tsbuildinfo
+
+# Misc
+.vercel
+.firebase/
+.netlify/
+.serverless/
+.fusebox/
+.dynamodb/
+.tern-port
+.eslintcache
+.stylelintcache
+.prettierignore
+.prettierrc
+.eslintignore
+.eslintrc.js
+.eslintrc.json
+.stylelintrc.json
+.stylelintrc.js
+
+# Logs and databases
+*.sqlite
+*.sqlite3
+*.db
+
+# Testing
+/coverage
+.nyc_output

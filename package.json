@@ -1,0 +1,75 @@
+{
+  "name": "expo-app",
+  "main": "expo-router/entry",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "expo start --tunnel",
+    "start-web": "expo start --web --tunnel",
+    "start-web-dev": "DEBUG=expo* expo start --web --tunnel",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
+  },
+  "dependencies": {
+    "@expo/cli": "^0.24.14",
+    "@expo/vector-icons": "^14.1.0",
+    "@firebase/auth": "^1.10.7",
+    "@react-native-async-storage/async-storage": "^2.1.2",
+    "@react-native-firebase/app": "^22.2.1",
+    "@react-native-firebase/auth": "^22.2.1",
+    "@react-native-firebase/firestore": "^22.2.1",
+    "@react-native-picker/picker": "2.11.0",
+    "@react-navigation/bottom-tabs": "^7.3.10",
+    "@react-navigation/drawer": "^7.3.9",
+    "@react-navigation/native": "^7.1.6",
+    "@react-navigation/native-stack": "^7.3.10",
+    "axios": "^1.9.0",
+    "expo": "53.0.12",
+    "expo-blur": "~14.1.5",
+    "expo-build-properties": "~0.14.6",
+    "expo-clipboard": "~7.1.4",
+    "expo-constants": "~17.1.6",
+    "expo-dev-client": "~5.2.1",
+    "expo-font": "~13.3.1",
+    "expo-haptics": "~14.1.4",
+    "expo-image": "~2.3.0",
+    "expo-image-picker": "~16.1.4",
+    "expo-linear-gradient": "~14.1.5",
+    "expo-linking": "~7.1.5",
+    "expo-location": "~18.1.5",
+    "expo-router": "~5.1.0",
+    "expo-splash-screen": "~0.30.9",
+    "expo-status-bar": "~2.2.3",
+    "expo-symbols": "~0.4.5",
+    "expo-system-ui": "~5.0.9",
+    "expo-web-browser": "~14.2.0",
+    "firebase": "^10.7.1",
+    "lucide-react-native": "^0.475.0",
+    "nativewind": "^4.1.23",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-native": "0.79.4",
+    "react-native-gesture-handler": "~2.24.0",
+    "react-native-maps": "1.20.1",
+    "react-native-reanimated": "~3.17.4",
+    "react-native-safe-area-context": "5.4.0",
+    "react-native-screens": "~4.11.1",
+    "react-native-svg": "15.11.2",
+    "react-native-vector-icons": "^10.2.0",
+    "react-native-web": "~0.20.0",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.2",
+    "@expo/ngrok": "^4.1.0",
+    "@types/react": "~19.0.10",
+    "typescript": "~5.8.3"
+  },
+  "expo": {
+    "doctor": {
+      "reactNativeDirectoryCheck": {
+        "listUnknownPackages": false
+      }
+    }
+  },
+  "private": true
+}
