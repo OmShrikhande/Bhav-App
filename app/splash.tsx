@@ -150,7 +150,7 @@ export default function SplashScreen() {
       >
         {/* Use Text instead of Image to avoid build errors */}
         <View style={styles.logoPlaceholder}>
-          <Text style={styles.logoText}>Bhav App</Text>
+          <Text style={styles.logoText}>Bhav Ap</Text>
         </View>
       </Animated.View>
     </LinearGradient>

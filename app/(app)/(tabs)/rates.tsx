@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
-import { TrendingUp, TrendingDown, RefreshCw, ArrowUp, ArrowDown, Minus, Package, ShoppingBag, Lock, Plus, Check, Menu, Bell } from "lucide-react-native";
+import { TrendingUp, TrendingDown, RefreshCw, ArrowUp, ArrowDown, Minus, Package, ShoppingBag, Lock, Plus, Check, Menu, Bell, PenSquare } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { Platform, Dimensions } from "react-native";
 import * as Font from "expo-font";
@@ -766,7 +766,7 @@ export default function RatesScreen() {
             <View style={styles.alertsHeader}>
               <Text style={styles.sectionTitle}>Manage Inventory</Text>
               <TouchableOpacity onPress={editInventory}>
-                <PenBoxIcon size={24} color="#333333" />
+                <PenSquare size={24} color="#333333" />
               </TouchableOpacity>
             </View>
 
