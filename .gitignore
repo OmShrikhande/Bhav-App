@@ -24,6 +24,10 @@ expo-env.d.ts
 *.aab
 *.hprof
 
+# Generated native folders
+/android/
+/ios/
+
 # Metro
 .metro-health-check*
 
