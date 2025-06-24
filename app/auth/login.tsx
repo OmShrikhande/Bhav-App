@@ -20,6 +20,7 @@ import { Mail, Lock, Eye, EyeOff } from "lucide-react-native";
 import { images } from "@/constants/images";
 import { useAuth } from '@/context/auth-context';
 import { ADMIN_USERNAME } from '@/store/auth-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -62,10 +63,18 @@ export default function LoginScreen() {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         }
 
+        // Clear any navigation flags before redirecting
+        await AsyncStorage.removeItem('navigation-in-progress');
+        
         // Navigate to the appropriate dashboard based on user role
-        if (firebaseAuth.user?.role === 'seller') {
+        if (firebaseAuth.user?.role === 'admin' || firebaseAuth.user?.username === ADMIN_USERNAME) {
+          console.log("Login: User is admin, navigating to admin dashboard");
+          router.replace("/(admin)/dashboard");
+        } else if (firebaseAuth.user?.role === 'seller') {
+          console.log("Login: User is seller, navigating to seller dashboard");
           router.replace("/(app)/(tabs)/seller-dashboard");
         } else {
+          console.log("Login: User is customer, navigating to customer dashboard");
           router.replace("/(app)/(tabs)/dashboard");
         }
       } else {
@@ -192,6 +201,14 @@ export default function LoginScreen() {
               </TouchableOpacity>
             </Link>
           </View>
+          
+          <View style={styles.adminLoginContainer}>
+            <Link href="/auth/admin-login" asChild>
+              <TouchableOpacity>
+                <Text style={styles.adminLoginText}>Admin Login</Text>
+              </TouchableOpacity>
+            </Link>
+          </View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -312,5 +329,14 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#F3B62B",
     cursor: "pointer",
+  },
+  adminLoginContainer: {
+    alignItems: "center",
+    marginTop: 16,
+  },
+  adminLoginText: {
+    fontSize: 14,
+    color: "#666666",
+    textDecorationLine: "underline",
   },
 });

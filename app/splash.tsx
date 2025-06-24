@@ -208,24 +208,53 @@ export default function SplashScreen() {
         if (authState.isAuthenticated) {
           console.log("User is authenticated, navigating to dashboard");
           
-          // Force a delay before navigation to ensure all components are ready
-          setTimeout(() => {
-            // Navigate based on user role
-            if (authState.user?.role === 'seller') {
-              console.log("Splash: User is a seller, navigating to seller dashboard");
-              // For sellers, we need to ensure they go to the seller dashboard tab
-              // Use a more direct approach to ensure navigation works
-              router.replace({
-                pathname: "/(app)/(tabs)/seller-dashboard"
-              });
-            } else if (authState.user?.role === 'admin') {
-              console.log("Splash: User is an admin, navigating to admin dashboard");
-              router.replace("/(admin)/dashboard");
-            } else {
-              console.log("Splash: User is a customer, navigating to customer dashboard");
-              router.replace("/(app)/(tabs)/dashboard");
+          // Use a more robust approach to prevent navigation loops
+          const navigateBasedOnRole = async () => {
+            try {
+              // Check if navigation is already in progress
+              const inProgress = await AsyncStorage.getItem('navigation-in-progress');
+              if (inProgress === 'true') {
+                console.log("Navigation already in progress, skipping");
+                return;
+              }
+              
+              // Set navigation in progress flag
+              await AsyncStorage.setItem('navigation-in-progress', 'true');
+              
+              // Log the current user for debugging
+              console.log("Splash - Current user:", authState.user ? JSON.stringify({
+                id: authState.user.id,
+                email: authState.user.email,
+                role: authState.user.role,
+                username: authState.user.username
+              }) : "No user");
+              
+              // Navigate based on user role
+              if (authState.user?.role === 'seller') {
+                console.log("Splash: User is a seller, navigating to seller dashboard");
+                router.replace("/(app)/(tabs)/seller-dashboard");
+              } else if (authState.user?.role === 'admin' || authState.user?.username === 'vipin_bullion') {
+                console.log("Splash: User is an admin, navigating to admin dashboard");
+                // For admin users, use a different approach to avoid loops
+                router.push("/(admin)/dashboard");
+              } else {
+                console.log("Splash: User is a customer, navigating to customer dashboard");
+                router.replace("/(app)/(tabs)/dashboard");
+              }
+              
+              // Clear the navigation flag after a delay
+              setTimeout(async () => {
+                await AsyncStorage.removeItem('navigation-in-progress');
+              }, 2000);
+            } catch (error) {
+              console.error("Navigation error:", error);
+              // Clear the flag in case of error
+              await AsyncStorage.removeItem('navigation-in-progress');
             }
-          }, 300);
+          };
+          
+          // Execute the navigation function
+          navigateBasedOnRole();
         } else {
           console.log("User is not authenticated, navigating to login");
           router.push("/auth/login");

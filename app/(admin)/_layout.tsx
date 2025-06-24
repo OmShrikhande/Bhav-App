@@ -5,17 +5,44 @@ import { useAuthStore, ADMIN_USERNAME } from "@/store/auth-store";
 import { useRouter } from "expo-router";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { Menu } from "lucide-react-native";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function AdminLayout() {
-  const { user } = useAuthStore();
+  const { user, users } = useAuthStore();
   const router = useRouter();
 
   // Move the redirect logic to useEffect to avoid setState during render
   useEffect(() => {
-    // Redirect non-admin users
-    if (user?.role !== "admin" && user?.username !== ADMIN_USERNAME) {
-      router.replace("/auth/login");
-    }
+    const checkAdminAccess = async () => {
+      try {
+        // Clear any navigation flags
+        await AsyncStorage.removeItem('navigation-in-progress');
+        
+        // Log the current user for debugging
+        console.log("Admin layout - Current user:", user ? JSON.stringify({
+          id: user.id,
+          email: user.email,
+          role: user.role,
+          username: user.username
+        }) : "No user");
+        
+        // Redirect non-admin users
+        if (!user) {
+          console.log("No user found, redirecting to login");
+          router.replace("/auth/login");
+        } else if (user.role !== "admin" && user.username !== ADMIN_USERNAME) {
+          console.log("User is not admin, redirecting to login");
+          router.replace("/auth/login");
+        } else {
+          console.log("Admin access confirmed for:", user.email);
+        }
+      } catch (error) {
+        console.error("Error in admin layout:", error);
+        router.replace("/auth/login");
+      }
+    };
+    
+    checkAdminAccess();
   }, [user, router]);
 
   const openDrawer = () => {
