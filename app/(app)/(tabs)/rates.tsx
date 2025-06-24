@@ -255,7 +255,7 @@ export default function RatesScreen() {
 
   // Navigate to seller profile
   const navigateToSellerProfile = (sellerId: string) => {
-    router.push(`/seller-profile/${sellerId}`);
+    router.push(`/(app)/seller-profile/${sellerId}`);
   };
 
 

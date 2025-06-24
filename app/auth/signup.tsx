@@ -175,7 +175,7 @@ export default function SignupScreen() {
               {
                 text: "Continue",
                 onPress: () => {
-                  router.replace("/(app)/(tabs)");
+                  router.replace("/(app)/(tabs)/seller-dashboard");
                 },
                 style: "default",
               },

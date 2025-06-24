@@ -118,8 +118,14 @@ export default function SplashScreen() {
           
           // Force a delay before navigation to ensure all components are ready
           setTimeout(() => {
-            // Use push instead of replace for more reliable navigation
-            router.push("/(app)/(tabs)/dashboard");
+            // Navigate based on user role
+            if (authState.user?.role === 'seller') {
+              router.push("/(app)/(tabs)/seller-dashboard");
+            } else if (authState.user?.role === 'admin') {
+              router.push("/(admin)/dashboard");
+            } else {
+              router.push("/(app)/(tabs)/dashboard");
+            }
           }, 300);
         } else {
           console.log("User is not authenticated, navigating to login");
@@ -150,7 +156,7 @@ export default function SplashScreen() {
       >
         {/* Use Text instead of Image to avoid build errors */}
         <View style={styles.logoPlaceholder}>
-          <Text style={styles.logoText}>Bhav Ap</Text>
+          <Text style={styles.logoText}>Bhav App</Text>
         </View>
       </Animated.View>
     </LinearGradient>

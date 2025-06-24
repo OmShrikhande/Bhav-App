@@ -62,9 +62,12 @@ export default function LoginScreen() {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         }
 
-        // Always navigate to the dashboard after successful login
-        // We'll let the app's navigation system handle role-based access
-        router.replace("/(app)/(tabs)");
+        // Navigate to the appropriate dashboard based on user role
+        if (firebaseAuth.user?.role === 'seller') {
+          router.replace("/(app)/(tabs)/seller-dashboard");
+        } else {
+          router.replace("/(app)/(tabs)/dashboard");
+        }
       } else {
         setError(result.error || "Invalid email or password");
         if (Platform.OS !== "web") {

@@ -83,7 +83,6 @@ export default function TabsLayout() {
         ),
       }}
     >
-
       <Tabs.Screen
         name="dashboard"
         options={{
