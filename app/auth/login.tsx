@@ -195,6 +195,8 @@ export default function LoginScreen() {
             </LinearGradient>
           </TouchableOpacity>
 
+
+
           <View style={styles.signupContainer}>
             <Text style={styles.signupText}>Don't have an account? </Text>
             <Link href="/auth/signup" asChild>
